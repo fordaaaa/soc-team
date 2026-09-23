@@ -4,6 +4,26 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "socteam-console"
+path = "src/main.rs"
+
 [lib]
 name = "console"
 path = "src/lib.rs"
+
+[dependencies]
+sensor = { path = "../sensor" }
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
+tokio.workspace = true

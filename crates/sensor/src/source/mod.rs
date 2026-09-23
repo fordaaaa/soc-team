@@ -12,6 +12,7 @@ pub mod time;
 
 pub use datalink::DatalinkSource;
 pub use pcap::PcapSource;
+pub use sim::SimSource;
 pub use time::{civil_from_unix_secs, now_iso8601};
 
 use std::time::SystemTime;

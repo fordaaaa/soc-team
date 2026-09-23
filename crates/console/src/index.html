@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>socteam console</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #0f151b; color: #dce6ef;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.9rem 1.2rem; border-bottom: 1px solid #222f3a;
+  }
+  header h1 { font-size: 1.1rem; margin: 0; font-weight: 600; }
+  #dot {
+    width: 0.7rem; height: 0.7rem; border-radius: 50%;
+    background: #e0a63c; display: inline-block;
+  }
+  #dot.live { background: #3ddc84; }
+  #mode { font-size: 0.8rem; opacity: 0.75; }
+  main { padding: 1.2rem; max-width: 56rem; margin: 0 auto; }
+  #meta { font-size: 0.85rem; opacity: 0.8; margin-bottom: 1rem; }
+  #starting { display: none; opacity: 0.8; }
+  .grid {
+    display: grid; gap: 0.7rem;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  }
+  .tile {
+    background: #162029; border: 1px solid #223140;
+    border-radius: 0.5rem; padding: 0.7rem 0.8rem;
+  }
+  .tile .label { font-size: 0.75rem; opacity: 0.7; }
+  .tile .value {
+    font-size: 1.35rem; font-variant-numeric: tabular-nums;
+    color: #4fb3e8; margin-top: 0.15rem;
+  }
+  section.chart {
+    margin-top: 1rem; background: #162029;
+    border: 1px solid #223140; border-radius: 0.5rem; padding: 0.8rem;
+  }
+  section.chart h2 { font-size: 0.85rem; margin: 0 0 0.5rem; font-weight: 600; }
+  canvas { width: 100%; height: 90px; display: block; }
+</style>
+</head>
+<body>
+<header>
+  <span id="dot" title="connection state"></span>
+  <h1>socteam console</h1>
+  <span id="mode">connecting…</span>
+</header>
+<main>
+  <div id="meta"><span id="source">—</span> · <span id="updated">—</span></div>
+  <div id="starting">starting…</div>
+  <div class="grid">
+    <div class="tile"><div class="label">Total frames</div><div class="value" id="total">—</div></div>
+    <div class="tile"><div class="label">pps</div><div class="value" id="pps">—</div></div>
+    <div class="tile"><div class="label">Bytes</div><div class="value" id="bytes">—</div></div>
+    <div class="tile"><div class="label">IPv4</div><div class="value" id="ipv4">—</div></div>
+    <div class="tile"><div class="label">IPv6</div><div class="value" id="ipv6">—</div></div>
+    <div class="tile"><div class="label">ARP</div><div class="value" id="arp">—</div></div>
+    <div class="tile"><div class="label">Other</div><div class="value" id="other">—</div></div>
+  </div>
+  <section class="chart">
+    <h2>pps (last 60 samples)</h2>
+    <canvas id="spark" width="600" height="90"></canvas>
+  </section>
+</main>
+<script>
+(function () {
+  "use strict";
+  var samples = [];
+  var dot = document.getElementById("dot");
+  var mode = document.getElementById("mode");
+  var pollTimer = null;
+
+  function setLive(live) {
+    dot.classList.toggle("live", live);
+    mode.textContent = live ? "live" : "polling";
+  }
+
+  function draw() {
+    var c = document.getElementById("spark");
+    var ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (samples.length < 2) { return; }
+    var max = Math.max.apply(null, samples.concat([1]));
+    ctx.strokeStyle = "#4fb3e8";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    samples.forEach(function (v, i) {
+      var x = (i / 59) * c.width;
+      var y = c.height - 4 - (v / max) * (c.height - 8);
+      if (i === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+    });
+    ctx.stroke();
+  }
+
+  function update(s) {
+    document.getElementById("starting").style.display = "none";
+    document.getElementById("total").textContent = s.total_frames;
+    document.getElementById("pps").textContent = Number(s.pps).toFixed(1);
+    document.getElementById("bytes").textContent = s.bytes;
+    document.getElementById("ipv4").textContent = s.ipv4;
+    document.getElementById("ipv6").textContent = s.ipv6;
+    document.getElementById("arp").textContent = s.arp;
+    document.getElementById("other").textContent = s.other;
+    document.getElementById("source").textContent = s.source_kind;
+    document.getElementById("updated").textContent = s.updated_at;
+    samples.push(Number(s.pps) || 0);
+    if (samples.length > 60) { samples.shift(); }
+    draw();
+  }
+
+  function showStarting() {
+    document.getElementById("starting").style.display = "block";
+  }
+
+  function poll() {
+    fetch("/api/stats").then(function (r) {
+      if (r.status === 503) { showStarting(); return null; }
+      if (!r.ok) { return null; }
+      return r.json();
+    }).then(function (s) {
+      if (s) { update(s); }
+    }).catch(function () { /* retry on next tick */ });
+  }
+
+  function startPolling() {
+    setLive(false);
+    if (pollTimer === null) {
+      pollTimer = setInterval(poll, 1000);
+      poll();
+    }
+  }
+
+  try {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    var ws = new WebSocket(proto + location.host + "/ws");
+    ws.onopen = function () {
+      setLive(true);
+      if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+    };
+    ws.onmessage = function (ev) {
+      try { update(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
+    };
+    ws.onclose = startPolling;
+    ws.onerror = startPolling;
+  } catch (e) {
+    startPolling();
+  }
+})();
+</script>
+</body>
+</html>
