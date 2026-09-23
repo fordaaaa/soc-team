@@ -8,6 +8,7 @@ pub mod dns;
 pub mod http;
 pub mod l2;
 pub mod l3;
+pub mod payload;
 pub mod tls;
 
 /// Link-layer identity of a captured frame.
