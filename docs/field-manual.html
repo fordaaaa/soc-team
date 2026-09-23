@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>socteam Field Manual</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #F7F9FB;
+    --surface: #FFFFFF;
+    --surface-2: #EEF2F6;
+    --ink: #1C2833;
+    --muted: #56677A;
+    --line: #D5DDE4;
+    --accent: #0E7DC2;
+    --accent-ink: #0B5E92;
+    --ok: #1F7A4D;
+    --warn: #9A6B0B;
+    --code-bg: #0F1B26;
+    --code-ink: #D7E4EF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F151B;
+      --surface: #18212A;
+      --surface-2: #1E2933;
+      --ink: #DCE6EF;
+      --muted: #92A3B4;
+      --line: #2C3944;
+      --accent: #4FB3E8;
+      --accent-ink: #7CC6EE;
+      --ok: #5CC98E;
+      --warn: #E0AC4A;
+      --code-bg: #0B131A;
+      --code-ink: #CFE0ED;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F151B;
+    --surface: #18212A;
+    --surface-2: #1E2933;
+    --ink: #DCE6EF;
+    --muted: #92A3B4;
+    --line: #2C3944;
+    --accent: #4FB3E8;
+    --accent-ink: #7CC6EE;
+    --ok: #5CC98E;
+    --warn: #E0AC4A;
+    --code-bg: #0B131A;
+    --code-ink: #CFE0ED;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 15.5px/1.65 "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    padding: 0 20px 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 940px; margin: 0 auto; }
+  header.masthead { padding: 56px 0 36px; border-bottom: 1px solid var(--line); }
+  .eyebrow {
+    font: 500 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  }
+  h1 {
+    font: 700 clamp(30px, 5vw, 42px)/1.08 "Barlow Semi Condensed", "IBM Plex Sans", sans-serif;
+    margin: 10px 0 12px; letter-spacing: -0.01em; text-wrap: balance;
+  }
+  .dek { max-width: 62ch; color: var(--muted); font-size: 16.5px; margin: 0 0 20px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font: 500 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+    padding: 6px 10px; border: 1px solid var(--line); border-radius: 3px;
+    background: var(--surface); color: var(--muted); white-space: nowrap;
+  }
+  .chip b { color: var(--ink); font-weight: 500; }
+  .chip.is-ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); color: var(--ok); }
+  .chip.is-now { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); color: var(--warn); }
+  section { padding: 44px 0 6px; }
+  h2 {
+    font: 600 24px/1.2 "Barlow Semi Condensed", "IBM Plex Sans", sans-serif;
+    margin: 6px 0 16px; letter-spacing: 0.002em; text-wrap: balance;
+  }
+  h3 {
+    font: 600 16.5px/1.3 "Barlow Semi Condensed", "IBM Plex Sans", sans-serif;
+    margin: 26px 0 8px;
+  }
+  p { margin: 0 0 14px; max-width: 70ch; }
+  p note, .aside {
+    font-size: 14px; color: var(--muted); border-left: 2px solid var(--line);
+    padding-left: 14px; display: block; margin: 16px 0; max-width: 66ch;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 20px; font-size: 14px; }
+  th {
+    text-align: left; font: 500 11px/1.2 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.mono, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; }
+  td:first-child { white-space: nowrap; }
+  .num { font-variant-numeric: tabular-nums; }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 6px;
+    padding: 16px 18px; overflow-x: auto; margin: 14px 0 20px;
+    font: 400 13px/1.6 "IBM Plex Mono", ui-monospace, monospace;
+  }
+  pre .c { color: #7A93A8; }
+  pre .k { color: #6FB6DF; }
+  pre .t { color: #E0AC4A; }
+  figure { margin: 26px 0 30px; }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    font-size: 13px; color: var(--muted); max-width: 68ch;
+    margin: 10px auto 0; text-align: left; padding: 0 2px;
+  }
+  .patterns { display: grid; grid-template-columns: 1fr; gap: 0; margin-top: 8px; }
+  .pattern { border-top: 1px solid var(--line); padding: 16px 0 12px; }
+  .pattern h3 { margin: 0 0 6px; }
+  .pattern p { margin: 0; font-size: 14.5px; max-width: 72ch; }
+  .guardrail {
+    border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--line));
+    background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+    border-radius: 6px; padding: 14px 18px; margin: 18px 0;
+    font-size: 14.5px; max-width: 70ch;
+  }
+  .guardrail .eyebrow { color: var(--warn); margin-bottom: 6px; }
+  footer {
+    margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 13px; display: flex; gap: 18px; flex-wrap: wrap;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  a { color: var(--accent-ink); }
+  @media (max-width: 560px) {
+    td:first-child { white-space: normal; }
+    .dek { font-size: 15px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="masthead">
+  <div class="eyebrow">private-network security sensor · technical reference</div>
+  <h1>socteam Field Manual</h1>
+  <p class="dek">A Security Operations Center you can hold in one hand: a Rust sensor that watches a
+  home network at packet level, learns what normal looks like, and tells you when it isn't.
+  This manual explains the system as built — every crate, every decision, and where it goes next.</p>
+  <div class="chips">
+    <span class="chip">crate workspace · <b>5 crates</b></span>
+    <span class="chip">rust <b>edition 2024</b></span>
+    <span class="chip is-ok">phase 0 · complete</span>
+    <span class="chip is-ok">increment 1A · complete</span>
+    <span class="chip is-ok">console v0 · complete</span>
+    <span class="chip is-ok">1B flows · complete</span>
+    <span class="chip is-ok">1C parsers · complete</span>
+    <span class="chip is-ok">1D events · complete</span>
+    <span class="chip is-now">1E store · next</span>
+    <span class="chip">target · <b>raspberry pi aarch64</b></span>
+    <span class="chip">commits · <b>feat / fix / docs</b></span>
+  </div>
+</header>
+
+<section id="what">
+  <div class="eyebrow">orientation</div>
+  <h2>What a SOC is, and what this one is</h2>
+  <p>A <b>SOC</b> — Security Operations Center — is the function that continuously watches an
+  environment for threats and responds. The industry builds it from people, process, and a stack
+  of technology. socteam rebuilds the technology slice at home scale:</p>
+  <table>
+    <thead><tr><th>SOC piece</th><th>What it does</th><th>Commercial form</th><th>socteam form</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">NDR sensor</td><td>watches the wire, packets → meaning</td><td>Zeek, Suricata</td><td class="mono"><b>sensor</b> crate — the core</td></tr>
+      <tr><td class="mono">SIEM</td><td>stores + correlates events</td><td>Splunk, Elastic</td><td class="mono"><b>store</b> (DuckDB, gated)</td></tr>
+      <tr><td class="mono">detections</td><td>events → alerts</td><td>Sigma rules</td><td class="mono"><b>detect</b> (phase 2)</td></tr>
+      <tr><td class="mono">console</td><td>where a human triages</td><td>Security Onion</td><td class="mono"><b>console</b> v0 — shipped</td></tr>
+      <tr><td class="mono">threat intel</td><td>known-bad indicators</td><td>MISP, feeds</td><td>opt-in feeds (phase 3)</td></tr>
+    </tbody>
+  </table>
+  <p>The library core has outgrown the <b>traffic light</b>: the flow table (1B) folds
+  bidirectional conversations, protocol parsers (1C) read DNS messages, HTTP header blocks, and
+  TLS ClientHellos — SNI, ciphers, extension order — straight off the wire bytes, and the event
+  pipeline (1D) now emits <i>meaning</i>: one Zeek-style stream of
+  <span class="mono">conn</span> / <span class="mono">dns</span> / <span class="mono">ssl</span> /
+  <span class="mono">http</span> / <span class="mono">heartbeat</span> records, written as
+  rotating NDJSON. The remaining upgrades before the sensor is production-shaped are storage
+  (1E) and the perf gate (1F).</p>
+</section>
+
+<section id="system">
+  <div class="eyebrow">as built</div>
+  <h2>The system today</h2>
+  <table>
+    <thead><tr><th>Crate</th><th>State</th><th>Job</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">sensor</td><td>real, ~5,150 lines</td><td>packet sources, L2–L4 + DNS/HTTP/TLS parsers, flow table, event pipeline + NDJSON sink, the CLI binary</td></tr>
+      <tr><td class="mono">console</td><td>real, v0</td><td>axum + WebSocket dashboard of live counters</td></tr>
+      <tr><td class="mono">detect</td><td>skeleton</td><td>rule engine — phase 2</td></tr>
+      <tr><td class="mono">store</td><td>skeleton</td><td>event store — phase 1E</td></tr>
+      <tr><td class="mono">ctl</td><td>minimal</td><td>management CLI (<span class="mono">socteam version|status</span>)</td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <svg viewBox="0 0 900 400" role="img" aria-label="Packet data path: three sources implement one PacketSource trait; a reader thread feeds an mpsc channel; the CLI main loop and the console collector both consume it; wall-clock deadlines drive output independent of traffic.">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.4">
+        <!-- sources box (trait boundary) -->
+        <rect x="20" y="30" width="200" height="230" rx="6" stroke-dasharray="5 4" opacity="0.55"/>
+        <!-- console branch box -->
+        <rect x="20" y="286" width="200" height="90" rx="6" stroke-dasharray="5 4" opacity="0.55"/>
+      </g>
+      <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">
+        <text x="120" y="52" text-anchor="middle" font-weight="500" style="fill:var(--accent-ink)">PacketSource trait</text>
+        <rect x="40" y="66" width="160" height="44" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="120" y="85" text-anchor="middle">live NIC</text>
+        <text x="120" y="100" text-anchor="middle" opacity="0.65" font-size="11">pnet · BPF/AF_PACKET</text>
+        <rect x="40" y="122" width="160" height="44" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="120" y="141" text-anchor="middle">pcap file</text>
+        <text x="120" y="156" text-anchor="middle" opacity="0.65" font-size="11">offline replay</text>
+        <rect x="40" y="178" width="160" height="44" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="120" y="197" text-anchor="middle">sim source</text>
+        <text x="120" y="212" text-anchor="middle" opacity="0.65" font-size="11">synthetic traffic</text>
+        <text x="120" y="242" text-anchor="middle" opacity="0.7" font-size="11">one interface,</text>
+        <text x="120" y="256" text-anchor="middle" opacity="0.7" font-size="11">three origins</text>
+
+        <!-- consumer boxes (CLI path) -->
+        <rect x="300" y="66" width="170" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="385" y="90" text-anchor="middle">reader thread</text>
+        <text x="385" y="106" text-anchor="middle" opacity="0.65" font-size="11">owns the source</text>
+        <rect x="560" y="66" width="180" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="650" y="86" text-anchor="middle">main loop</text>
+        <text x="650" y="102" text-anchor="middle" opacity="0.65" font-size="11">recv_timeout(deadline)</text>
+        <rect x="560" y="160" width="180" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="650" y="184" text-anchor="middle">LinkCounter</text>
+        <text x="650" y="200" text-anchor="middle" opacity="0.65" font-size="11">pure logic · no I/O</text>
+        <rect x="560" y="254" width="180" height="46" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="650" y="274" text-anchor="middle">stdout status lines</text>
+        <text x="650" y="290" text-anchor="middle" opacity="0.65" font-size="11">total= pps= ipv4= …</text>
+
+        <!-- console path -->
+        <rect x="300" y="286" width="170" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="385" y="310" text-anchor="middle">SnapshotCollector</text>
+        <text x="385" y="326" text-anchor="middle" opacity="0.65" font-size="11">console crate</text>
+        <rect x="560" y="286" width="180" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="650" y="306" text-anchor="middle">axum + WebSocket</text>
+        <text x="650" y="322" text-anchor="middle" opacity="0.65" font-size="11">/api/stats · /ws</text>
+        <rect x="790" y="286" width="90" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="835" y="312" text-anchor="middle">browser</text>
+        <text x="835" y="328" text-anchor="middle" opacity="0.65" font-size="11">dashboard</text>
+
+        <!-- arrows -->
+        <g stroke="currentColor" stroke-width="1.4" fill="none">
+          <path d="M200,88 L300,88" marker-end="url(#arr)"/>
+          <path d="M200,144 C250,144 250,96 300,96" marker-end="url(#arr)" opacity="0.7"/>
+          <path d="M200,200 C250,200 250,104 300,104" marker-end="url(#arr)" opacity="0.7"/>
+          <path d="M470,96 L560,96" marker-end="url(#arr)"/>
+          <path d="M650,126 L650,160" marker-end="url(#arr)"/>
+          <path d="M650,220 L650,254" marker-end="url(#arr)"/>
+          <path d="M385,126 C385,220 385,240 385,286" marker-end="url(#arr)" opacity="0.7"/>
+          <path d="M470,316 L560,316" marker-end="url(#arr)"/>
+          <path d="M740,316 L790,316" marker-end="url(#arr)"/>
+        </g>
+        <text x="497" y="84" text-anchor="middle" opacity="0.75" font-size="11">mpsc channel</text>
+        <text x="497" y="98" text-anchor="middle" opacity="0.55" font-size="10.5">bytes · ts · wire len</text>
+        <!-- wall clock annotation -->
+        <g style="stroke:var(--accent-ink); fill:none; stroke-width:1.4">
+          <circle cx="778" cy="96" r="10"/>
+          <path d="M778,90 L778,96 L783,98"/>
+        </g>
+        <text x="778" y="128" text-anchor="middle" font-size="11" style="fill:var(--accent-ink)">wall-clock deadline</text>
+        <text x="778" y="142" text-anchor="middle" font-size="10.5" opacity="0.75">ticks with or without traffic</text>
+      </g>
+    </svg>
+    <figcaption><b>Figure 1 — the packet path.</b> Three origins implement one trait, so the
+    sensor cannot tell a live NIC from a replayed file from a simulator. A reader thread owns the
+    source and ships frames over a channel; consumers block on <span class="mono">recv_timeout</span>
+    against a wall-clock deadline, which is why output continues during total silence. The console
+    (lower path) subscribes to the same seam — no sensor code changed to add it.</figcaption>
+  </figure>
+
+  <p>The seam is a three-line trait. Everything downstream of it is source-agnostic:</p>
+  <pre><span class="c">// crates/sensor/src/source/mod.rs</span>
+<span class="k">pub trait</span> <span class="t">PacketSource</span> {
+    <span class="k">type</span> Item;
+    <span class="k">fn</span> next_packet(&amp;<span class="k">mut self</span>) -&gt; <span class="t">Option</span>&lt;<span class="k">Self</span>::Item&gt;;  <span class="c">// None = clean EOF</span>
+}</pre>
+  <p>Each item is a <span class="mono">CapturedPacket</span> — raw frame bytes, a capture
+  timestamp, and the on-wire length (which can exceed the stored length when a capture snaps long
+  frames). Live capture stamps arrival time; pcap replay maps file timestamps onto the same clock,
+  so tests are deterministic.</p>
+
+  <h3>The event stream (1D)</h3>
+  <p>With <span class="mono">--events &lt;DIR&gt;</span> the sensor folds every frame through the
+  flow table and the protocol parsers, and writes what it understood as tagged NDJSON — one JSON
+  object per line, rotated to a fresh file before any line would push the current one past
+  <span class="mono">--rotate-bytes</span> (16 MiB by default: an SD-card-friendly ceiling).
+  Idle and half-open conversations are reaped by timeout into <span class="mono">conn</span>
+  records with a Zeek-style state label; quiet seconds still produce a
+  <span class="mono">heartbeat</span> so a silent sensor is distinguishable from a dead one.</p>
+  <pre><span class="c"># replay a capture and emit events (synthetic fixture shown)</span>
+socteam-sensor --pcap capture.pcap --events /var/lib/socteam/events
+<span class="t">{"event":"dns","uid":"dns1","ts":1770000000.0,"src":"192.0.2.10","dst":"198.51.100.7","src_port":5353,"dst_port":53,"txid":18499,"is_response":false,"rcode":0,"query":"example.com.","qtype":1,"answers":[]}</span>
+<span class="t">{"event":"conn","uid":"conn8","ts":1770000000.3,"duration":0.1,"proto":"tcp","conn_state":"REJ","end_reason":"rst","src":"192.0.2.10","dst":"198.51.100.7","src_port":5555,"dst_port":8080,"pkts_a_to_b":2,"bytes_a_to_b":108,"pkts_b_to_a":0,"bytes_b_to_a":0}</span></pre>
+</section>
+
+<section id="decisions">
+  <div class="eyebrow">engineering decisions</div>
+  <h2>Choices that shape everything downstream</h2>
+  <div class="patterns">
+    <div class="pattern">
+      <h3>Pure core, I/O shell</h3>
+      <p><span class="mono">count.rs</span> does arithmetic on byte slices and nothing else — no
+      network, no disk, no clock. Everything messy is pushed to the edges. The logic that matters
+      is therefore testable with plain <span class="mono">cargo test</span>, no root and no
+      hardware, which is exactly what CI runs on every push.</p>
+    </div>
+    <div class="pattern">
+      <h3>A trait between us and the hardware</h3>
+      <p>Phase 2+ swaps the Linux backend to raw AF_PACKET rings with eBPF filters — kernel-side,
+      near-zero-copy capture. Because sources live behind <span class="mono">PacketSource</span>,
+      that swap touches one file and nothing downstream changes. The abstraction was bought for
+      testing; it pays again for the low-latency path.</p>
+    </div>
+    <div class="pattern">
+      <h3>Threads and channels, not async</h3>
+      <p>The reader thread plus an mpsc channel is the whole concurrency model — zero runtime
+      overhead on the packet path and simpler to reason about. Async (tokio) enters exactly one
+      place: the console's web server, where it belongs. The hot path stays sync by design.</p>
+    </div>
+    <div class="pattern">
+      <h3>Errors as data, never panics</h3>
+      <p>Every frame is untrusted bytes from a network that may be hostile — that is the threat
+      model of the sensor itself. Library code returns typed errors
+      (<span class="mono">thiserror</span>), the binary adds context
+      (<span class="mono">anyhow</span>). <span class="mono">None</span> strictly means clean
+      end-of-stream; malformed input is <span class="mono">Some(Err(_))</span>. A parser crash is
+      a remote DoS vulnerability wearing a different hat.</p>
+    </div>
+    <div class="pattern">
+      <h3>Synthetic fixtures only</h3>
+      <p>Tests build packets in code and generate pcaps on the fly. Real captures never enter the
+      repository — they can contain credentials, and a security repo that leaks its own network's
+      secrets has failed at its one job.</p>
+    </div>
+    <div class="pattern">
+      <h3>CI as a gate, and the Pi as a first-class target</h3>
+      <p>Every commit must pass formatting, clippy with warnings-as-errors, the test suite, and a
+      cross-compile check for <span class="mono">aarch64-unknown-linux-gnu</span> — the Raspberry
+      Pi's architecture. A change that breaks the deployment target cannot land silently on a
+      dev-machine success.</p>
+    </div>
+  </div>
+</section>
+
+<section id="console">
+  <div class="eyebrow">current work</div>
+  <h2>Console v0 — seeing what we have</h2>
+  <p>The first window into the sensor: <span class="mono">socteam-console</span> serves a
+  self-contained dashboard (no CDN, no framework) and streams one snapshot per second over a
+  WebSocket, with a plain JSON endpoint as fallback. It shows what exists today — source kind,
+  total frames, packets-per-second with a live sparkline, byte count, and the ethertype
+  breakdown.</p>
+  <pre><span class="c"># sudo-free demo — the sim source generates plausible traffic</span>
+cargo run -p console --bin socteam-console -- --simulate
+<span class="c"># real capture (needs root)          # replay a capture file</span>
+sudo socteam-console --iface en0            socteam-console --pcap capture.pcap</pre>
+  <p>It binds to <span class="mono">127.0.0.1:8080</span> by default, and that is deliberate:
+  there is no authentication yet, so the monitoring pane stays on loopback until auth exists.
+  Exposing it to the LAN is a one-flag decision that waits for a security story.</p>
+</section>
+
+<section id="placement">
+  <div class="eyebrow">deployment</div>
+  <h2>Where it sits on the wire</h2>
+  <figure>
+    <svg viewBox="0 0 900 300" role="img" aria-label="Two deployment modes. Passive: the switch mirrors traffic to the sensor out of band, adding zero latency. Inline: the sensor forwards every packet through an XDP fast path under one millisecond, with a watchdog relay that fails open.">
+      <defs>
+        <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">
+        <text x="225" y="24" text-anchor="middle" font-weight="500" opacity="0.7">NOW — PASSIVE (OUT OF BAND)</text>
+        <g stroke="currentColor" stroke-width="1.5" fill="none">
+          <rect x="30" y="60" width="90" height="44" rx="4"/><rect x="180" y="60" width="90" height="44" rx="4"/><rect x="330" y="60" width="90" height="44" rx="4"/>
+          <path d="M120,82 L180,82" marker-end="url(#arr2)"/><path d="M270,82 L330,82" marker-end="url(#arr2)"/>
+        </g>
+        <text x="75" y="86" text-anchor="middle">WAN</text><text x="225" y="86" text-anchor="middle">router</text><text x="375" y="86" text-anchor="middle">switch</text>
+        <text x="465" y="70" text-anchor="middle" opacity="0.65" font-size="11">LAN devices</text>
+        <g stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.75">
+          <path d="M420,92 C450,92 450,120 465,120 M465,120 L520,120"/>
+          <path d="M375,104 L375,170" marker-end="url(#arr2)"/>
+        </g>
+        <g style="stroke:var(--accent-ink); fill:none; stroke-width="1.5">
+          <rect x="290" y="170" width="170" height="48" rx="4"/>
+        </g>
+        <text x="375" y="190" text-anchor="middle" style="fill:var(--accent-ink)">sensor (tap)</text>
+        <text x="375" y="206" text-anchor="middle" font-size="10.5" opacity="0.8">Pi · sees a copy of everything</text>
+        <text x="375" y="245" text-anchor="middle" font-size="11" style="fill:var(--accent-ink)">added latency: 0 ms — copy, not cut</text>
+
+        <text x="225" y="24" text-anchor="middle" font-weight="0" opacity="0"> </text>
+        <text x="675" y="24" text-anchor="middle" font-weight="500" opacity="0.7">PHASE 4 — INLINE (ENFORCING)</text>
+        <g stroke="currentColor" stroke-width="1.5" fill="none">
+          <rect x="560" y="60" width="80" height="44" rx="4"/>
+          <rect x="680" y="56" width="130" height="52" rx="4" style="stroke:var(--accent-ink); stroke-width:1.8"/>
+          <rect x="830" y="60" width="50" height="44" rx="4"/>
+          <path d="M640,82 L680,82" marker-end="url(#arr2)"/>
+          <path d="M810,82 L830,82" marker-end="url(#arr2)"/>
+        </g>
+        <text x="600" y="86" text-anchor="middle">WAN</text>
+        <text x="745" y="78" text-anchor="middle" style="fill:var(--accent-ink)">sensor XDP</text>
+        <text x="745" y="94" text-anchor="middle" font-size="10.5">fast path · verdicts</text>
+        <text x="855" y="86" text-anchor="middle" font-size="11">LAN</text>
+        <g stroke="currentColor" stroke-width="1.1" fill="none" stroke-dasharray="4 3" opacity="0.8">
+          <path d="M745,108 C745,150 745,150 745,170" marker-end="url(#arr2)"/>
+        </g>
+        <rect x="665" y="170" width="160" height="48" rx="4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <text x="745" y="190" text-anchor="middle">watchdog relay</text>
+        <text x="745" y="206" text-anchor="middle" font-size="10.5" opacity="0.8">sensor dies → wire stays up</text>
+        <text x="745" y="245" text-anchor="middle" font-size="11" style="fill:var(--accent-ink)">added latency: &lt; 1 ms p99 @ 1 Gbps</text>
+      </g>
+    </svg>
+    <figcaption><b>Figure 2 — the one edge that changes.</b> Passive mode watches a mirror of the
+    traffic (SPAN port), so the sensor can crash without consequence and adds nothing to the path.
+    Inline mode <i>becomes</i> the path — every packet is forwarded through an XDP fast path that
+    can also drop or redirect it — which buys enforcement and costs a watchdog that fails the wire
+    open if the sensor ever hangs.</figcaption>
+  </figure>
+  <p class="aside">Sequencing is the point: detection logic is built and proven entirely in the
+  consequence-free passive mode, and only graduates to inline once it has earned trust — the
+  watchdog is the admission ticket, not an afterthought.</p>
+</section>
+
+<section id="roadmap">
+  <div class="eyebrow">roadmap</div>
+  <h2>Feature by feature, gate by gate</h2>
+  <figure>
+    <svg viewBox="0 0 900 130" role="img" aria-label="Phase track: phase 0 and increment 1A are complete; console v0 is current; 1B through 1F, then phases 2 through 5, are ahead.">
+      <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">
+        <line x1="30" y1="62" x2="870" y2="62" stroke="currentColor" stroke-width="1.4"/>
+        <!-- done nodes -->
+        <g>
+          <circle cx="60" cy="62" r="9" style="fill:var(--ok); stroke:none"/>
+          <circle cx="150" cy="62" r="9" style="fill:var(--ok); stroke:none"/>
+          <circle cx="252" cy="62" r="9" style="fill:var(--ok); stroke:none"/>
+          <circle cx="370" cy="62" r="9" style="fill:var(--ok); stroke:none"/>
+          <circle cx="440" cy="62" r="9" style="fill:var(--ok); stroke:none"/>
+          <circle cx="510" cy="62" r="9" style="fill:var(--ok); stroke:none"/>
+          <circle cx="580" cy="62" r="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="650" cy="62" r="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="724" cy="62" r="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="798" cy="62" r="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="866" cy="62" r="8" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        </g>
+        <text x="60" y="40" text-anchor="middle">P0</text>
+        <text x="150" y="40" text-anchor="middle">1A</text>
+        <text x="252" y="40" text-anchor="middle">console</text>
+        <text x="370" y="40" text-anchor="middle">1B</text>
+        <text x="440" y="40" text-anchor="middle">1C</text>
+        <text x="510" y="40" text-anchor="middle">1D</text>
+        <text x="580" y="36" text-anchor="middle" style="fill:var(--warn)">1E</text>
+        <text x="650" y="40" text-anchor="middle">1F</text>
+        <text x="724" y="40" text-anchor="middle">P2</text>
+        <text x="798" y="40" text-anchor="middle">P3</text>
+        <text x="866" y="40" text-anchor="middle">P4–5</text>
+        <text x="60" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">scaffold</text>
+        <text x="150" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">sources</text>
+        <text x="252" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">dashboard</text>
+        <text x="370" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">flows</text>
+        <text x="440" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">parsers</text>
+        <text x="510" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">events</text>
+        <text x="580" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">store</text>
+        <text x="650" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">perf gate</text>
+        <text x="724" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">detections</text>
+        <text x="798" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">fingerprints</text>
+        <text x="866" y="92" text-anchor="middle" opacity="0.7" font-size="10.5">inline·harden</text>
+        <g font-size="10.5">
+          <circle cx="30" cy="115" r="4" style="fill:var(--ok); stroke:none"/>
+          <text x="40" y="119" opacity="0.75">done</text>
+          <circle cx="90" cy="115" r="4.5" fill="none" style="stroke:var(--warn); stroke-width:2"/>
+          <text x="100" y="119" opacity="0.75">now</text>
+          <circle cx="150" cy="115" r="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <text x="160" y="119" opacity="0.75">queued</text>
+        </g>
+      </g>
+    </svg>
+    <figcaption><b>Figure 3 — the phase track.</b> Each node is a gated increment: tests green,
+    then a <span class="mono">feat:</span> commit. Nothing ships because the calendar says so.</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th>Phase</th><th>Delivers</th><th>Gate — "done when"</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">1B flows</td><td>L2/L3 parser (VLAN, IPv6, ICMP) + flow table with idle/active timeouts</td><td>bidirectional talk maps to one flow; timeout expiry emits records</td></tr>
+      <tr><td class="mono">1C parsers</td><td>DNS (hickory), HTTP (httparse), TLS ClientHello (hand-rolled SNI)</td><td>fuzz-proof on malformed input; fixture suite per protocol</td></tr>
+      <tr><td class="mono">1D events</td><td>Zeek-style event stream (conn/dns/ssl/http) as NDJSON with rotation</td><td>golden-output tests; heartbeat events on idle</td></tr>
+      <tr><td class="mono">1E store</td><td><span class="mono">Store</span> trait + DuckDB behind a default-off feature; <span class="mono">ctl flows</span> query</td><td>replay lands in the store; queries return them; aarch64 CI stays cheap</td></tr>
+      <tr><td class="mono">1F perf</td><td>replay bench, criterion micro-benches, drop/parse-error counters</td><td>≥ 1 Mpps sustained through the pipeline, zero silent drops</td></tr>
+      <tr><td class="mono">P2 detections</td><td>ARP-spoof watch, port-scan, new-device, DNS-tunnel heuristics, alerts to your phone</td><td>unknown device pings you within a minute; nmap of your own LAN raises a scan alert</td></tr>
+      <tr><td class="mono">P3 fingerprints</td><td>JA3/JA4 baselines, SNI log, opt-in blocklists, weekly drift report</td><td>unknown-client alert fires on fixtures</td></tr>
+      <tr><td class="mono">P4 inline</td><td>XDP fast path, verdict maps, watchdog fail-open</td><td>1 Gbps inline &lt; 1 ms added p99; <span class="mono">kill -9</span> leaves the network up</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="redblue">
+  <div class="eyebrow">the long game</div>
+  <h2>Red and blue, one core</h2>
+  <p>The end state is a platform where offensive tools test the defensive sensor they share genes
+  with — a syn-scanner and a scan detector want the same packet builders, a spoof generator and
+  an ARP-watch want the same L2 code. One parser core, two customers:</p>
+  <figure>
+    <svg viewBox="0 0 900 240" role="img" aria-label="Purple loop: a red module generates an attack, the sensor observes it, a detection rule fires an alert, and the test asserts the alert — closing the loop back to the red module.">
+      <defs>
+        <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">
+        <g stroke="currentColor" stroke-width="1.5" fill="none">
+          <rect x="40" y="60" width="180" height="56" rx="4"/>
+          <rect x="360" y="60" width="180" height="56" rx="4"/>
+          <rect x="360" y="160" width="180" height="56" rx="4"/>
+          <rect x="680" y="60" width="180" height="56" rx="4"/>
+          <path d="M220,88 L360,88" marker-end="url(#arr3)"/>
+          <path d="M450,116 L450,160" marker-end="url(#arr3)"/>
+          <path d="M540,188 L760,188 C800,188 800,140 800,116" marker-end="url(#arr3)" style="stroke:var(--accent-ink)"/>
+          <path d="M760,88 C700,30 200,30 130,60" marker-end="url(#arr3)" opacity="0.75"/>
+        </g>
+        <text x="130" y="84" text-anchor="middle">red module</text>
+        <text x="130" y="100" text-anchor="middle" opacity="0.65" font-size="11">attack generator</text>
+        <text x="450" y="84" text-anchor="middle">sensor</text>
+        <text x="450" y="100" text-anchor="middle" opacity="0.65" font-size="11">shared parser + flow core</text>
+        <text x="450" y="184" text-anchor="middle">detection rule</text>
+        <text x="450" y="200" text-anchor="middle" opacity="0.65" font-size="11">port-scan · arp-watch · …</text>
+        <text x="770" y="84" text-anchor="middle">assertion</text>
+        <text x="770" y="100" text-anchor="middle" opacity="0.65" font-size="11">alert fired? test green</text>
+        <text x="290" y="76" text-anchor="middle" opacity="0.75" font-size="11">attack traffic</text>
+        <text x="466" y="142" text-anchor="start" opacity="0.75" font-size="11">events</text>
+        <text x="640" y="178" text-anchor="middle" font-size="11" style="fill:var(--accent-ink)">alert</text>
+        <text x="430" y="22" text-anchor="middle" opacity="0.7" font-size="11">new test case feeds back into more attacks</text>
+      </g>
+    </svg>
+    <figcaption><b>Figure 4 — the purple loop.</b> Red-team crates exist to test blue-team
+    defenses: generate the attack, watch the sensor see it, assert the alert. Every detection
+    ships with a test that plays attacker against it.</figcaption>
+  </figure>
+  <div class="guardrail">
+    <div class="eyebrow">hard rule — from AGENTS.md</div>
+    Red-team/attack tooling runs <b>only</b> against networks and hosts you own or have explicit
+    authorization to test — never third-party systems. The red track does not start until the
+    blue core (phases 1–2) is complete.
+  </div>
+</section>
+
+<section id="glossary">
+  <div class="eyebrow">reference</div>
+  <h2>Working vocabulary</h2>
+  <table>
+    <thead><tr><th>Term</th><th>Meaning here</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">NDR</td><td>Network Detection &amp; Response — the sensor category socteam belongs to</td></tr>
+      <tr><td class="mono">flow</td><td>one conversation: canonical 5-tuple + timing + per-direction byte/packet counts</td></tr>
+      <tr><td class="mono">pps</td><td>packets per second — the sensor's heartbeat metric</td></tr>
+      <tr><td class="mono">SPAN</td><td>switch port that mirrors all traffic to a tap interface — passive mode's feed</td></tr>
+      <tr><td class="mono">AF_PACKET</td><td>Linux raw-packet socket; ring + fanout variant is the low-latency capture path</td></tr>
+      <tr><td class="mono">XDP / eBPF</td><td>in-kernel fast path for inline verdicts at line rate — phase 4's engine</td></tr>
+      <tr><td class="mono">SNI</td><td>Server Name Indication — the hostname in a TLS ClientHello, visible without decrypting</td></tr>
+      <tr><td class="mono">JA3 / JA4</td><td>fingerprints of a TLS client's hello — identifies the tool, not the bits</td></tr>
+      <tr><td class="mono">beaconing</td><td>periodic callbacks characteristic of malware C2 — detected by rhythm, not signature</td></tr>
+      <tr><td class="mono">IoC</td><td>indicator of compromise — a known-bad IP, domain, or hash from a feed</td></tr>
+      <tr><td class="mono">purple team</td><td>red tests blue in a loop — the operating model of figure 4</td></tr>
+      <tr><td class="mono">mpsc</td><td>multi-producer, single-consumer channel — the sensor's entire concurrency story</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <span>socteam · field manual</span>
+  <span>updated 2026-09-23</span>
+  <span>figures match the tree as of commit 9920ef4</span>
+</footer>
+
+</div>
+</body>
+</html>
