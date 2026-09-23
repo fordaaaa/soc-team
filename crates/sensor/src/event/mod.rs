@@ -1,7 +1,11 @@
 //! Zeek-inspired event model: one serde enum whose variants serialize as
 //! tagged NDJSON records (`{"event":"conn",...}`).
 
+pub mod pipeline;
 pub mod sink;
+
+pub use pipeline::EventPipeline;
+pub use sink::NdjsonSink;
 
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
