@@ -7,7 +7,7 @@ pub mod sink;
 pub use pipeline::EventPipeline;
 pub use sink::NdjsonSink;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Unix-epoch seconds as f64 (millisecond-resolution timestamps).
@@ -36,7 +36,7 @@ pub fn proto_name(proto: u8) -> &'static str {
 /// v0 protocol events carry their own uid from a global pipeline counter
 /// (not the owning connection's uid) — correlation is by 5-tuple + ts;
 /// documented simplification.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     Conn(ConnEvent),
@@ -47,7 +47,7 @@ pub enum Event {
 }
 
 /// Connection summary record (Zeek `conn`-inspired).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConnEvent {
     /// Unique event id from the global pipeline counter.
     pub uid: String,
@@ -80,7 +80,7 @@ pub struct ConnEvent {
 }
 
 /// DNS query/response record (Zeek `dns`-inspired).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DnsEvent {
     /// Unique event id from the global pipeline counter.
     pub uid: String,
@@ -109,7 +109,7 @@ pub struct DnsEvent {
 }
 
 /// TLS handshake record (Zeek `ssl`-inspired).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SslEvent {
     /// Unique event id from the global pipeline counter.
     pub uid: String,
@@ -132,7 +132,7 @@ pub struct SslEvent {
 }
 
 /// HTTP header-block record (Zeek `http`-inspired).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HttpEvent {
     /// Unique event id from the global pipeline counter.
     pub uid: String,
@@ -161,7 +161,7 @@ pub struct HttpEvent {
 }
 
 /// Periodic pipeline counters record.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HeartbeatEvent {
     /// Capture timestamp, unix-epoch seconds.
     pub ts: f64,

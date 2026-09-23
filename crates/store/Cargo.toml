@@ -7,3 +7,12 @@ license.workspace = true
 [lib]
 name = "store"
 path = "src/lib.rs"
+
+[dependencies]
+sensor = { path = "../sensor" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
