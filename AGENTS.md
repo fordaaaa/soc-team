@@ -86,6 +86,19 @@ Work in the three brig roles (source: `/Users/user/Documents/GitHub/context-mcp/
   contain credentials. Treat captured data as sensitive; sanitize pcaps before
   committing test fixtures.
 
+## Red-team tooling & detection testing
+
+- Long-term vision: this workspace may grow red-team (offensive) modules. Their
+  first-class purpose is testing our own defenses (purple teaming): an attack
+  generator feeds the sensor and the test asserts the detection fires.
+- HARD RULE: red-team/attack tooling runs ONLY against networks and hosts the
+  user owns or has explicit authorization to test — never third-party systems.
+  Refuse tasks that ask otherwise.
+- Every detection must ship with a test: synthetic fixtures now, red-module
+  generated traffic later.
+- Do not start red-team crates until the blue core (phases 1–2) is complete;
+  keep them out of scope in commits and PRs until then.
+
 ## Git — commit per change
 
 - After every implemented feature, fix, or docs change, commit it — one
