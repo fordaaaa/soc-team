@@ -7,6 +7,7 @@
 
 pub mod datalink;
 pub mod pcap;
+pub mod sim;
 pub mod time;
 
 pub use datalink::DatalinkSource;
