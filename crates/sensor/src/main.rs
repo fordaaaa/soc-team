@@ -1,18 +1,22 @@
 //! `socteam-sensor` — Phase 0 skeleton binary.
 //!
-//! Opens an interface via `pnet::datalink` and prints per-interval frame
-//! counters to stdout.
+//! Opens an interface via `pnet::datalink` or replays a pcap file and
+//! prints per-interval frame counters to stdout.
 //!
 //! Phase 1 replaces the datalink backend on Linux with AF_PACKET rings +
 //! eBPF filtering for zero-copy/low latency.
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use pnet::datalink::{Channel, Config};
-use sensor::{count::LinkCounter, iface::list_interfaces};
+use sensor::{
+    count::LinkCounter,
+    iface::list_interfaces,
+    source::{DatalinkSource, PacketSource, PcapSource, SourceItem, now_iso8601},
+};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 /// Local-network security sensor (Phase 0 skeleton).
 #[derive(Debug, Parser)]
@@ -21,6 +25,10 @@ struct Args {
     /// Interface to capture on (e.g. en0, eth0).
     #[arg(long)]
     iface: Option<String>,
+
+    /// Replay packets from a pcap file instead of live capture.
+    #[arg(long, conflicts_with = "iface")]
+    pcap: Option<PathBuf>,
 
     /// List available interfaces and exit.
     #[arg(long)]
@@ -39,43 +47,6 @@ struct Args {
     promiscuous: bool,
 }
 
-/// Current UTC time as an ISO-8601 string (`YYYY-MM-DDTHH:MM:SSZ`).
-fn now_iso8601() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let (y, mo, d, h, mi, s) = civil_from_unix_secs(secs);
-    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
-}
-
-/// Convert unix seconds to (year, month, day, hour, min, sec) in UTC
-/// (Howard Hinnant's days-from-civil algorithm, pure std).
-fn civil_from_unix_secs(secs: u64) -> (i64, u64, u64, u64, u64, u64) {
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let mut y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    if m <= 2 {
-        y += 1;
-    }
-    (
-        y,
-        m as u64,
-        d as u64,
-        rem / 3_600,
-        (rem % 3_600) / 60,
-        rem % 60,
-    )
-}
-
 fn print_interfaces() {
     let ifaces = list_interfaces();
     if ifaces.is_empty() {
@@ -87,6 +58,36 @@ fn print_interfaces() {
     }
 }
 
+fn print_status(counter: &mut LinkCounter) {
+    let pps = counter.pps_since();
+    let s = counter.snapshot();
+    println!(
+        "{} total={} pps={:.1} bytes={} ipv4={} ipv6={} arp={} other={}",
+        now_iso8601(),
+        s.total_frames,
+        pps,
+        s.bytes,
+        s.ipv4,
+        s.ipv6,
+        s.arp,
+        s.other
+    );
+}
+
+fn print_summary(counter: &LinkCounter) {
+    let s = counter.snapshot();
+    println!(
+        "{} summary total={} bytes={} ipv4={} ipv6={} arp={} other={}",
+        now_iso8601(),
+        s.total_frames,
+        s.bytes,
+        s.ipv4,
+        s.ipv6,
+        s.arp,
+        s.other
+    );
+}
+
 fn run() -> Result<()> {
     let args = Args::parse();
 
@@ -94,12 +95,6 @@ fn run() -> Result<()> {
         print_interfaces();
         return Ok(());
     }
-
-    let Some(iface_name) = args.iface.clone() else {
-        print_interfaces();
-        println!("hint: pass --iface <NAME> to capture, or --list-ifaces to list");
-        return Ok(());
-    };
 
     if args.interval == 0 {
         bail!("--interval must be >= 1");
@@ -120,28 +115,46 @@ fn run() -> Result<()> {
     })
     .context("failed to install Ctrl-C handler")?;
 
-    let interfaces = pnet::datalink::interfaces();
-    let interface = interfaces
-        .into_iter()
-        .find(|i| i.name == iface_name)
-        .with_context(|| format!("interface '{iface_name}' not found"))?;
-
-    let config = Config {
-        promiscuous: args.promiscuous,
-        ..Config::default()
+    // Build the packet source: pcap replay or live capture.
+    let source: Box<dyn PacketSource<Item = SourceItem> + Send> = if let Some(path) = &args.pcap {
+        if args.promiscuous {
+            tracing::info!("--promiscuous has no effect in --pcap mode");
+        }
+        tracing::info!(pcap = %path.display(), "replaying pcap");
+        Box::new(
+            PcapSource::open(path)
+                .with_context(|| format!("failed to open pcap '{}'", path.display()))?,
+        )
+    } else {
+        let Some(iface_name) = args.iface.clone() else {
+            print_interfaces();
+            println!("hint: pass --iface <NAME> to capture, or --list-ifaces to list");
+            return Ok(());
+        };
+        tracing::info!(iface = %iface_name, "capturing");
+        Box::new(DatalinkSource::open(&iface_name, args.promiscuous)?)
     };
-    let mut rx = match pnet::datalink::channel(&interface, config)
-        .context("failed to open datalink channel (try running with sudo)")?
-    {
-        Channel::Ethernet(_, rx) => rx,
-        _ => bail!("unsupported channel type for interface '{iface_name}'"),
-    };
 
-    tracing::info!(iface = %iface_name, "capturing");
+    // Reader thread owns the source and pushes (bytes, timestamp, wire len)
+    // over an unbounded channel as fast as the source yields them. The main
+    // loop below uses `recv_timeout` so status/heartbeat lines fire on
+    // wall-clock intervals even with zero traffic (fixing the old
+    // blocking-`rx.next()` idle starvation), leaving a hook for future
+    // flow-expiry work.
+    let (tx, rx) = std::sync::mpsc::channel::<SourceItem>();
+    std::thread::spawn(move || {
+        let mut src = source;
+        while let Some(item) = src.next_packet() {
+            if tx.send(item).is_err() {
+                break;
+            }
+        }
+    });
 
     let mut counter = LinkCounter::new();
     let interval = Duration::from_secs(args.interval);
     let mut deadline = Instant::now() + interval;
+    let mut eof = false;
 
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -149,54 +162,45 @@ fn run() -> Result<()> {
             break;
         }
 
-        match rx.next() {
-            Ok(frame) => {
-                counter.record_frame(frame);
-            }
-            Err(e) => {
-                if shutdown.load(Ordering::SeqCst) {
+        let timeout = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(timeout) {
+            Ok(Ok(pkt)) => {
+                counter.record_frame(&pkt.data);
+                if let Some(max) = args.max_packets
+                    && counter.snapshot().total_frames >= max
+                {
                     break;
                 }
-                tracing::warn!(error = %e, "read error");
+                // Fast replay can lap the deadline without a timeout; emit
+                // wall-clock status lines so long pcaps still report.
+                if Instant::now() >= deadline {
+                    print_status(&mut counter);
+                    deadline = Instant::now() + interval;
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "source read error");
                 continue;
             }
-        }
-
-        if let Some(max) = args.max_packets
-            && counter.snapshot().total_frames >= max
-        {
-            break;
-        }
-
-        if Instant::now() >= deadline {
-            let pps = counter.pps_since();
-            let s = counter.snapshot();
-            println!(
-                "{} total={} pps={:.1} bytes={} ipv4={} ipv6={} arp={} other={}",
-                now_iso8601(),
-                s.total_frames,
-                pps,
-                s.bytes,
-                s.ipv4,
-                s.ipv6,
-                s.arp,
-                s.other
-            );
-            deadline = Instant::now() + interval;
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                print_status(&mut counter);
+                deadline = Instant::now() + interval;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                eof = true;
+                break;
+            }
         }
     }
 
-    let s = counter.snapshot();
-    println!(
-        "{} summary total={} bytes={} ipv4={} ipv6={} arp={} other={}",
-        now_iso8601(),
-        s.total_frames,
-        s.bytes,
-        s.ipv4,
-        s.ipv6,
-        s.arp,
-        s.other
-    );
+    print_summary(&counter);
+    if !eof {
+        // The reader thread may be blocked inside `pnet::datalink`'s
+        // uninterruptible `next()`; joining it could hang shutdown
+        // (Ctrl-C / max-packets) forever. It owns no resources needing
+        // cleanup, so exit the process directly and let the OS reclaim it.
+        std::process::exit(0);
+    }
     Ok(())
 }
 
