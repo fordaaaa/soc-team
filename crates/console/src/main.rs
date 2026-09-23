@@ -48,6 +48,33 @@ struct Cli {
     /// Target packets per second for synthetic traffic (sim only).
     #[arg(long, default_value_t = 240)]
     pps: u32,
+
+    /// Do not open the console in the default browser after start.
+    ///
+    /// Auto-open is best-effort: on headless hosts (e.g. a Pi over SSH)
+    /// the attempt fails softly and is logged; the URL is always printed.
+    #[arg(long)]
+    no_open: bool,
+}
+
+/// Best-effort open of `url` in the default browser.
+///
+/// Never fatal: a missing opener (headless host) or a failed spawn is
+/// logged and the caller's stdout URL remains the fallback.
+fn open_browser(url: &str) {
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    match std::process::Command::new(program).arg(url).spawn() {
+        Ok(child) => {
+            tracing::debug!(pid = child.id(), url, "opened browser");
+        }
+        Err(e) => {
+            tracing::info!(error = %e, url, "browser not opened (headless host?); use the URL above");
+        }
+    }
 }
 
 async fn run() -> Result<()> {
@@ -117,6 +144,9 @@ async fn run() -> Result<()> {
         "socteam-console listening on http://{} (source: {kind})",
         args.bind
     );
+    if !args.no_open {
+        open_browser(&format!("http://{}", args.bind));
+    }
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             if let Err(e) = tokio::signal::ctrl_c().await {
