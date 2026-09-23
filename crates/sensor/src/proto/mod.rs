@@ -4,8 +4,11 @@ use pnet::datalink::MacAddr;
 use pnet_packet::ethernet::EtherType;
 use std::net::IpAddr;
 
+pub mod dns;
+pub mod http;
 pub mod l2;
 pub mod l3;
+pub mod tls;
 
 /// Link-layer identity of a captured frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
