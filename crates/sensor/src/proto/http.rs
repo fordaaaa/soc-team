@@ -21,7 +21,8 @@ const HOST_CAP: usize = 255;
 const USER_AGENT_CAP: usize = 128;
 
 /// Parsed HTTP header block, request or response. All strings capped.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HttpKind {
     Request,
     Response,

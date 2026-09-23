@@ -7,6 +7,7 @@
 //! eBPF filtering for zero-copy/low latency.
 
 pub mod count;
+pub mod event;
 pub mod flow;
 pub mod iface;
 pub mod proto;
