@@ -9,6 +9,29 @@ Always prefer opencode-bridge MCP (`ask_opencode`) over native subagents. If
 opencode-bridge tools are absent, halt and report diagnostics. Never silently
 substitute with own subagents.
 
+### Delegation pattern (proven on 1C/1D)
+
+- **Pre-pin every design decision in the prompt**: exact structs with field
+  names/types/order, function signatures, error variants, test names and the
+  exact strings they assert, style rules (never-panic, synthetic fixtures,
+  doc-comment density). An agent with freedom re-decides; an agent with a
+  spec executes.
+- **One file (or tight file set) per agent.** Parallel agents are write-only:
+  they never run cargo/git/brig (sibling crates may not compile mid-race) and
+  never edit shared files. The orchestrator pre-stages shared-file changes
+  (deps, module wiring, trait derives) before deploying.
+- **The orchestrator runs the single authoritative gate** after agents land:
+  full read of every produced file (never trust the agent's receipt — this
+  caught a TLS extension-length offset bug in 1C), then
+  `cargo test --workspace` + `clippy --all-targets -D warnings` + `fmt --check`,
+  fixing small bugs directly rather than re-delegating.
+- **Integration work that spans files goes to one sequential agent** (or the
+  orchestrator), not a parallel fan-out.
+- **Stage commits bisectably**: for each commit, temporarily reduce files to
+  the subset that compiles without the not-yet-landed siblings (copy full
+  versions to /tmp, write the reduced one, `git add`, restore), and verify
+  each commit `cargo check`s standalone before pushing.
+
 ## Startup check — do this first, before any code work
 
 1. List available MCP tools. Confirm `opencode-bridge` is connected with:
