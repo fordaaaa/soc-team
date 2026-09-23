@@ -3,3 +3,6 @@ PLAN.md
 
 # macOS
 .DS_Store
+
+# build output
+/target

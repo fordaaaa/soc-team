@@ -1,0 +1,23 @@
+[package]
+name = "sensor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "socteam-sensor"
+path = "src/main.rs"
+
+[lib]
+name = "sensor"
+path = "src/lib.rs"
+
+[dependencies]
+pnet.workspace = true
+pnet_packet.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ctrlc.workspace = true
