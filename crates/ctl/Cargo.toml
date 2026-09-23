@@ -14,3 +14,9 @@ path = "src/lib.rs"
 
 [dependencies]
 clap.workspace = true
+anyhow.workspace = true
+store = { path = "../store" }
+sensor = { path = "../sensor" }
+
+[dev-dependencies]
+tempfile.workspace = true
