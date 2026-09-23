@@ -1,26 +1,30 @@
-//! `socteam-sensor` — Phase 0 skeleton binary.
+//! `socteam-sensor` — packet counter + Zeek-style event emitter.
 //!
-//! Opens an interface via `pnet::datalink` or replays a pcap file and
-//! prints per-interval frame counters to stdout.
+//! Opens an interface via `pnet::datalink` or replays a pcap file, prints
+//! per-interval frame counters to stdout, and (with `--events <DIR>`)
+//! writes conn/dns/ssl/http/heartbeat events as rotating NDJSON.
 //!
 //! Phase 1 replaces the datalink backend on Linux with AF_PACKET rings +
 //! eBPF filtering for zero-copy/low latency.
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use sensor::{
-    count::LinkCounter,
-    iface::list_interfaces,
-    source::{DatalinkSource, PacketSource, PcapSource, SourceItem, now_iso8601},
-};
+use sensor::count::LinkCounter;
+use sensor::event::{Event, EventPipeline, NdjsonSink};
+use sensor::iface::list_interfaces;
+use sensor::source::{DatalinkSource, PacketSource, PcapSource, SourceItem, now_iso8601};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-/// Local-network security sensor (Phase 0 skeleton).
+/// Local-network security sensor.
 #[derive(Debug, Parser)]
-#[command(name = "socteam-sensor", version, about = "socteam sensor skeleton")]
+#[command(
+    name = "socteam-sensor",
+    version,
+    about = "socteam local-network sensor"
+)]
 struct Args {
     /// Interface to capture on (e.g. en0, eth0).
     #[arg(long)]
@@ -45,6 +49,17 @@ struct Args {
     /// Enable promiscuous mode on the capture interface.
     #[arg(long, default_value_t = false)]
     promiscuous: bool,
+
+    /// Write Zeek-style NDJSON events (conn/dns/ssl/http/heartbeat) under
+    /// this directory, rotating files at --rotate-bytes. Opt-in: without
+    /// it the sensor only prints counters.
+    #[arg(long)]
+    events: Option<PathBuf>,
+
+    /// Rotate the NDJSON event file when it exceeds this many bytes
+    /// (SD-card-friendly default).
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    rotate_bytes: u64,
 }
 
 fn print_interfaces() {
@@ -152,6 +167,14 @@ fn run() -> Result<()> {
     });
 
     let mut counter = LinkCounter::new();
+    let mut pipeline = EventPipeline::new(Duration::from_secs(60), Duration::from_secs(3600));
+    let mut sink = match &args.events {
+        Some(dir) => Some(
+            NdjsonSink::create(dir, "events", args.rotate_bytes)
+                .with_context(|| format!("failed to create event sink in '{}'", dir.display()))?,
+        ),
+        None => None,
+    };
     let interval = Duration::from_secs(args.interval);
     let mut deadline = Instant::now() + interval;
     let mut eof = false;
@@ -166,6 +189,9 @@ fn run() -> Result<()> {
         match rx.recv_timeout(timeout) {
             Ok(Ok(pkt)) => {
                 counter.record_frame(&pkt.data);
+                let events =
+                    pipeline.observe(pkt.timestamp, u64::from(pkt.original_len), &pkt.data);
+                write_events(&mut sink, events)?;
                 if let Some(max) = args.max_packets
                     && counter.snapshot().total_frames >= max
                 {
@@ -185,6 +211,9 @@ fn run() -> Result<()> {
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 print_status(&mut counter);
                 deadline = Instant::now() + interval;
+                let now = SystemTime::now();
+                write_events(&mut sink, pipeline.expire(now))?;
+                write_events(&mut sink, vec![pipeline.heartbeat(now)])?;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 eof = true;
@@ -194,12 +223,39 @@ fn run() -> Result<()> {
     }
 
     print_summary(&counter);
+    // Drain remaining flows and flush before any non-EOF exit: the sink's
+    // BufWriter would not run its Drop on `process::exit` below.
+    write_events(&mut sink, pipeline.finish())?;
+    if let Some(sink) = &mut sink {
+        sink.flush().context("failed to flush event sink")?;
+        println!(
+            "{} events dir={} files={} events={}",
+            now_iso8601(),
+            args.events
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new(""))
+                .display(),
+            sink.files_written(),
+            sink.events_written()
+        );
+    }
     if !eof {
         // The reader thread may be blocked inside `pnet::datalink`'s
         // uninterruptible `next()`; joining it could hang shutdown
         // (Ctrl-C / max-packets) forever. It owns no resources needing
         // cleanup, so exit the process directly and let the OS reclaim it.
         std::process::exit(0);
+    }
+    Ok(())
+}
+
+/// Append events to the sink when one is configured; a no-op otherwise.
+fn write_events(sink: &mut Option<NdjsonSink>, events: Vec<Event>) -> Result<()> {
+    if let Some(sink) = sink {
+        for event in &events {
+            sink.write(event)
+                .context("failed to write event to NDJSON sink")?;
+        }
     }
     Ok(())
 }
