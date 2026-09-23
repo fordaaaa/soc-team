@@ -8,4 +8,5 @@
 
 pub mod count;
 pub mod iface;
+pub mod proto;
 pub mod source;
