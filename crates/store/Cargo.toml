@@ -8,11 +8,19 @@ license.workspace = true
 name = "store"
 path = "src/lib.rs"
 
+[features]
+# Off by default: the `duckdb` crate vendors the full C++ engine when the
+# `bundled` feature builds it, which is a hazard for the aarch64
+# cross-check and for Raspberry Pi builds. The in-memory + NDJSON path is
+# the default; enable this feature for the persistent DuckDB backend.
+duckdb = ["dep:duckdb"]
+
 [dependencies]
 sensor = { path = "../sensor" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+duckdb = { version = "1.10505", optional = true, features = ["bundled"] }
 
 [dev-dependencies]
 tempfile.workspace = true

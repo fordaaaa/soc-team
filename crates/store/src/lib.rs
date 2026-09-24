@@ -2,13 +2,19 @@
 //! stream and the operator.
 //!
 //! v0 ships an in-memory backend ([`MemoryStore`]) fed from NDJSON files
-//! via [`load_file`]/[`load_dir`]; the DuckDB backend lands behind a
-//! default-off feature later in phase 1E.
+//! via [`load_file`]/[`load_dir`]; a persistent DuckDB backend is
+//! available behind the default-off `duckdb` feature (see
+//! [`duckdb::DuckStore`]).
 
 use sensor::event::{ConnEvent, Event};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+
+/// DuckDB-backed [`EventStore`] (requires the default-off `duckdb`
+/// feature; the crate vendors the full C++ engine).
+#[cfg(feature = "duckdb")]
+pub mod duckdb;
 
 /// Errors from store operations: I/O while reading event files, or a
 /// line that does not deserialize as an [`Event`].
@@ -27,6 +33,13 @@ pub enum StoreError {
         /// Serde error description.
         message: String,
     },
+    /// An event failed to (de)serialize.
+    #[error("serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+    /// Underlying DuckDB error (only with the `duckdb` feature).
+    #[cfg(feature = "duckdb")]
+    #[error("duckdb error: {0}")]
+    Duck(#[from] ::duckdb::Error),
 }
 
 /// Filter for flow queries.
