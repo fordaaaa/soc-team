@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
-use crate::{EventStore, FlowFilter, FlowRow, StoreError};
+use crate::{AlertFilter, EventStore, FlowFilter, FlowRow, StoreError};
 use ::duckdb::types::Value;
 use ::duckdb::{Connection, params, params_from_iter};
-use sensor::event::Event;
+use sensor::event::{AlertEvent, Event, Severity};
 
 /// DuckDB-backed [`EventStore`] storing every event as a JSON blob.
 pub struct DuckStore {
@@ -47,6 +47,8 @@ fn event_ts_kind(event: &Event) -> (f64, &'static str) {
         Event::Dns(e) => (e.ts, "dns"),
         Event::Ssl(e) => (e.ts, "ssl"),
         Event::Http(e) => (e.ts, "http"),
+        Event::Arp(e) => (e.ts, "arp"),
+        Event::Alert(e) => (e.ts, "alert"),
         Event::Heartbeat(e) => (e.ts, "heartbeat"),
     }
 }
@@ -104,6 +106,35 @@ impl EventStore for DuckStore {
         for line in &rows {
             if let Event::Conn(c) = serde_json::from_str::<Event>(line)? {
                 out.push(FlowRow::from_conn(&c));
+            }
+        }
+        Ok(out)
+    }
+
+    fn query_alerts(&self, filter: &AlertFilter) -> Result<Vec<AlertEvent>, StoreError> {
+        let mut sql = String::from("SELECT json FROM events WHERE kind = 'alert'");
+        let mut args: Vec<Value> = Vec::new();
+        if let Some(since) = filter.since_ts {
+            sql.push_str(" AND ts >= ?");
+            args.push(since.into());
+        }
+        if let Some(name) = &filter.name {
+            sql.push_str(" AND json_extract_string(json, '$.name') = ?");
+            args.push(Value::Text(name.clone()));
+        }
+        sql.push_str(" ORDER BY rowid");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows: Vec<String> = stmt
+            .query_map(params_from_iter(args), |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<String>, ::duckdb::Error>>()?;
+        let mut out = Vec::new();
+        for line in &rows {
+            if let Event::Alert(a) = serde_json::from_str::<Event>(line)? {
+                // Severity ordering is a Rust-side concern: the enum's
+                // declaration order does not survive the JSON round trip.
+                if filter.min_severity.is_none_or(|min| a.severity >= min) {
+                    out.push(a);
+                }
             }
         }
         Ok(out)
@@ -255,5 +286,50 @@ mod tests {
         store.append_all(&events).unwrap();
         assert_eq!(store.len().unwrap(), 50);
         assert_eq!(store.query_flows(&FlowFilter::default()).unwrap().len(), 50);
+    }
+
+    /// Synthetic alert event with fully explicit fields.
+    fn alert_event(uid: &str, ts: f64, name: &str, severity: Severity) -> Event {
+        Event::Alert(AlertEvent {
+            uid: uid.to_string(),
+            ts,
+            name: name.to_string(),
+            severity,
+            src: "192.0.2.66".to_string(),
+            dst: None,
+            message: "synthetic alert".to_string(),
+            evidence: vec![],
+        })
+    }
+
+    #[test]
+    fn duck_alerts_roundtrip_and_filters() {
+        let mut store = DuckStore::open_in_memory().unwrap();
+        store
+            .append_all(&[
+                alert_event("a1", 100.0, "port-scan", Severity::Medium),
+                alert_event("a2", 101.0, "arp-spoof", Severity::High),
+            ])
+            .unwrap();
+        assert_eq!(
+            store.query_alerts(&AlertFilter::default()).unwrap().len(),
+            2
+        );
+
+        let by_name = AlertFilter {
+            name: Some("arp-spoof".to_string()),
+            ..AlertFilter::default()
+        };
+        let got = store.query_alerts(&by_name).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].severity, Severity::High);
+
+        let min_high = AlertFilter {
+            min_severity: Some(Severity::High),
+            ..AlertFilter::default()
+        };
+        let got = store.query_alerts(&min_high).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].uid, "a2");
     }
 }

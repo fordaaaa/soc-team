@@ -6,7 +6,7 @@
 //! available behind the default-off `duckdb` feature (see
 //! [`duckdb::DuckStore`]).
 
-use sensor::event::{ConnEvent, Event};
+use sensor::event::{AlertEvent, ConnEvent, Event, Severity};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -49,6 +49,17 @@ pub struct FlowFilter {
     pub since_ts: Option<f64>,
     /// Exact match against conn `src` OR `dst`; `None` = any host.
     pub host: Option<String>,
+}
+
+/// Filter for alert queries.
+#[derive(Debug, Clone, Default)]
+pub struct AlertFilter {
+    /// Unix-epoch seconds lower bound (inclusive); `None` = no bound.
+    pub since_ts: Option<f64>,
+    /// Exact match against the detection name; `None` = any detection.
+    pub name: Option<String>,
+    /// Minimum severity (inclusive); `None` = any severity.
+    pub min_severity: Option<Severity>,
 }
 
 /// One queried connection summary (a [`ConnEvent`] projection).
@@ -122,6 +133,9 @@ pub trait EventStore: Send {
     /// Conn events passing `filter`, in append order.
     fn query_flows(&self, filter: &FlowFilter) -> Result<Vec<FlowRow>, StoreError>;
 
+    /// Alert events passing `filter`, in append order.
+    fn query_alerts(&self, filter: &AlertFilter) -> Result<Vec<AlertEvent>, StoreError>;
+
     /// Total events stored (all kinds).
     fn len(&self) -> Result<usize, StoreError>;
 
@@ -180,6 +194,23 @@ impl EventStore for MemoryStore {
         Ok(rows)
     }
 
+    fn query_alerts(&self, filter: &AlertFilter) -> Result<Vec<AlertEvent>, StoreError> {
+        let alerts: Vec<AlertEvent> = self
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Alert(a) => {
+                    let since_ok = filter.since_ts.is_none_or(|since| a.ts >= since);
+                    let name_ok = filter.name.as_ref().is_none_or(|name| name == &a.name);
+                    let sev_ok = filter.min_severity.is_none_or(|min| a.severity >= min);
+                    (since_ok && name_ok && sev_ok).then(|| a.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        Ok(alerts)
+    }
+
     fn len(&self) -> Result<usize, StoreError> {
         Ok(self.events.len())
     }
@@ -223,7 +254,7 @@ pub fn load_dir(store: &mut impl EventStore, dir: &Path) -> Result<(), StoreErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sensor::event::DnsEvent;
+    use sensor::event::{AlertEvent, DnsEvent, Severity};
     use std::io::Write;
 
     /// Synthetic conn event with fully explicit fields.
@@ -373,6 +404,60 @@ mod tests {
         );
         assert!(msg.contains(":2:"), "message lacks line number: {msg}");
         assert!(msg.contains("invalid event"), "message lacks cause: {msg}");
+    }
+
+    /// Synthetic alert event with fully explicit fields.
+    fn alert(uid: &str, ts: f64, name: &str, severity: Severity) -> Event {
+        Event::Alert(AlertEvent {
+            uid: uid.to_string(),
+            ts,
+            name: name.to_string(),
+            severity,
+            src: "192.0.2.66".to_string(),
+            dst: Some("198.51.100.7".to_string()),
+            message: "synthetic alert".to_string(),
+            evidence: vec![],
+        })
+    }
+
+    #[test]
+    fn query_alerts_filters() {
+        let mut store = MemoryStore::new();
+        store
+            .append_all(&[
+                alert("a1", 100.0, "port-scan", Severity::Medium),
+                alert("a2", 101.0, "arp-spoof", Severity::High),
+                conn("conn1", 102.0, "192.0.2.10", "198.51.100.7"),
+            ])
+            .unwrap();
+        assert_eq!(
+            store.query_alerts(&AlertFilter::default()).unwrap().len(),
+            2
+        );
+
+        let by_name = AlertFilter {
+            name: Some("port-scan".to_string()),
+            ..AlertFilter::default()
+        };
+        let got = store.query_alerts(&by_name).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].uid, "a1");
+
+        let min_high = AlertFilter {
+            min_severity: Some(Severity::High),
+            ..AlertFilter::default()
+        };
+        let got = store.query_alerts(&min_high).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].uid, "a2");
+
+        let since = AlertFilter {
+            since_ts: Some(101.0),
+            ..AlertFilter::default()
+        };
+        let got = store.query_alerts(&since).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].uid, "a2");
     }
 
     #[test]

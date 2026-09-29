@@ -4,6 +4,7 @@ use pnet::datalink::MacAddr;
 use pnet_packet::ethernet::EtherType;
 use std::net::IpAddr;
 
+pub mod arp;
 pub mod dns;
 pub mod http;
 pub mod l2;

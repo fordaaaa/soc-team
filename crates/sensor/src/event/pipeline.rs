@@ -18,12 +18,21 @@
 //!   tracking), Zeek-inspired.
 //! - Protocol events carry their own uid from the global pipeline
 //!   counter, not the owning connection's uid; correlate by 5-tuple + ts.
+//! - ARP events come straight off untagged Ethernet frames; VLAN-tagged
+//!   ARP emits nothing (v0 gap).
 
 use std::time::{Duration, SystemTime};
 
-use super::{ConnEvent, DnsEvent, Event, HeartbeatEvent, HttpEvent, SslEvent, proto_name, unix_ts};
+use pnet_packet::ethernet::EtherTypes;
+
+use super::{
+    ArpEvent, ConnEvent, DnsEvent, Event, HeartbeatEvent, HttpEvent, SslEvent, proto_name, unix_ts,
+};
 use crate::flow::{EndReason, FlowRecord, FlowTable};
-use crate::proto::{dns, http, l2, payload, tls};
+use crate::proto::{arp, dns, http, l2, payload, tls};
+
+/// Ethernet header length in bytes (ARP bodies start here).
+const ETHERNET_HEADER_LEN: usize = 14;
 
 /// Folds frames into a [`FlowTable`] and dispatches L4 payloads to the
 /// protocol parsers by port, producing Zeek-style [`Event`]s.
@@ -64,6 +73,28 @@ impl EventPipeline {
             return Vec::new();
         };
         self.table.observe(ts, wire_len, &info);
+
+        // ARP has no L3/L4 headers: dispatch straight off L2.
+        if info.l2.ethertype == EtherTypes::Arp {
+            if info.l2.vlan.is_some() {
+                return Vec::new();
+            }
+            let Some(summary) = arp::parse(&frame[ETHERNET_HEADER_LEN..]) else {
+                return Vec::new();
+            };
+            let uid = self.next_uid("arp");
+            self.events_emitted += 1;
+            return vec![Event::Arp(ArpEvent {
+                uid,
+                ts: unix_ts(ts),
+                src: summary.sender_ip,
+                sender_mac: summary.sender_mac,
+                target_ip: summary.target_ip,
+                target_mac: summary.target_mac,
+                op: if summary.is_reply { "reply" } else { "request" }.to_string(),
+                is_gratuitous: summary.is_gratuitous,
+            })];
+        }
 
         let (Some(l3), Some(l4)) = (info.l3, info.l4) else {
             return Vec::new();
@@ -274,7 +305,6 @@ mod tests {
     use hickory_proto::op::{Message, MessageType, Query};
     use hickory_proto::rr::{Name, RecordType};
     use pnet::datalink::MacAddr;
-    use pnet_packet::MutablePacket;
     use pnet_packet::ethernet::{EtherType, EtherTypes, MutableEthernetPacket};
     use pnet_packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
     use pnet_packet::ipv4::MutableIpv4Packet;
@@ -382,20 +412,26 @@ mod tests {
         eth_frame(EtherTypes::Ipv4, &ip)
     }
 
+    /// 28-byte Ethernet/IPv4 ARP body (request by default).
+    fn arp_body_bytes(oper: u16, spa: [u8; 4], tpa: [u8; 4]) -> Vec<u8> {
+        let mut body = Vec::with_capacity(28);
+        body.extend_from_slice(&1u16.to_be_bytes()); // htype: ethernet
+        body.extend_from_slice(&0x0800u16.to_be_bytes()); // ptype: ipv4
+        body.push(6); // hlen
+        body.push(4); // plen
+        body.extend_from_slice(&oper.to_be_bytes());
+        body.extend_from_slice(&mac(0x02).octets()); // sender MAC
+        body.extend_from_slice(&spa);
+        body.extend_from_slice(&[0x00; 6]); // target MAC (zero in requests)
+        body.extend_from_slice(&tpa);
+        body
+    }
+
     fn arp_frame() -> Vec<u8> {
-        let mut buf = vec![0u8; 14 + 28];
-        {
-            let mut eth = MutableEthernetPacket::new(&mut buf).expect("eth buffer too small");
-            eth.set_destination(mac(0x01));
-            eth.set_source(mac(0x02));
-            eth.set_ethertype(EtherTypes::Arp);
-            let packet = eth.packet_mut();
-            packet[14] = 0x00;
-            packet[15] = 0x01;
-            packet[16] = 0x08;
-            packet[17] = 0x00;
-        }
-        buf
+        eth_frame(
+            EtherTypes::Arp,
+            &arp_body_bytes(1, [10, 0, 0, 1], [10, 0, 0, 2]),
+        )
     }
 
     fn dns_query_payload() -> Vec<u8> {
@@ -604,12 +640,46 @@ mod tests {
     }
 
     #[test]
-    fn arp_counted_but_no_flow() {
+    fn arp_emits_event_but_no_flow() {
         let mut p = pipe();
         let frame = arp_frame();
         let events = p.observe(ts(0), frame.len() as u64, &frame);
-        assert!(events.is_empty());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            Event::Arp(a) => {
+                assert_eq!(a.src, "10.0.0.1");
+                assert_eq!(a.sender_mac, "02:00:00:00:00:02");
+                assert_eq!(a.target_ip, "10.0.0.2");
+                assert_eq!(a.op, "request");
+                assert!(!a.is_gratuitous);
+            }
+            other => panic!("expected ArpEvent, got {other:?}"),
+        }
+        assert_eq!(p.active_flows(), 0);
         assert_eq!(p.total_frames(), 1);
+    }
+
+    #[test]
+    fn arp_gratuitous_flagged() {
+        let mut p = pipe();
+        let frame = eth_frame(
+            EtherTypes::Arp,
+            &arp_body_bytes(1, [10, 0, 0, 5], [10, 0, 0, 5]),
+        );
+        let events = p.observe(ts(0), frame.len() as u64, &frame);
+        match &events[0] {
+            Event::Arp(a) => assert!(a.is_gratuitous),
+            other => panic!("expected ArpEvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arp_malformed_body_emits_nothing() {
+        let mut p = pipe();
+        // Zeroed body: operation 0 is not a valid ARP operation.
+        let frame = eth_frame(EtherTypes::Arp, &[0u8; 28]);
+        let events = p.observe(ts(0), frame.len() as u64, &frame);
+        assert!(events.is_empty());
         assert_eq!(p.active_flows(), 0);
     }
 
