@@ -55,6 +55,15 @@ struct Cli {
     /// the attempt fails softly and is logged; the URL is always printed.
     #[arg(long)]
     no_open: bool,
+
+    /// Directory of sensor NDJSON events: enables the flows and alerts
+    /// views (alerts are also read from --alerts-file when given).
+    #[arg(long)]
+    events: Option<PathBuf>,
+
+    /// Alert NDJSON file written by `socteam detect`.
+    #[arg(long)]
+    alerts_file: Option<PathBuf>,
 }
 
 /// Best-effort open of `url` in the default browser.
@@ -136,7 +145,12 @@ async fn run() -> Result<()> {
         });
     }
 
-    let app = router(std::sync::Arc::clone(&collector));
+    let state = std::sync::Arc::new(console::ConsoleState::new(
+        collector,
+        args.events,
+        args.alerts_file,
+    ));
+    let app = router(state);
     let listener = tokio::net::TcpListener::bind(&args.bind)
         .await
         .with_context(|| format!("failed to bind '{}'", args.bind))?;

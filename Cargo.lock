@@ -527,6 +527,8 @@ dependencies = [
  "sensor",
  "serde",
  "serde_json",
+ "store",
+ "tempfile",
  "tokio",
  "tower",
  "tracing",

@@ -44,6 +44,24 @@
   }
   section.chart h2 { font-size: 0.85rem; margin: 0 0 0.5rem; font-weight: 600; }
   canvas { width: 100%; height: 90px; display: block; }
+  section.panel {
+    margin-top: 1rem; background: #162029;
+    border: 1px solid #223140; border-radius: 0.5rem; padding: 0.8rem;
+  }
+  section.panel h2 { font-size: 0.85rem; margin: 0 0 0.5rem; font-weight: 600; }
+  section.panel .hint { font-size: 0.8rem; opacity: 0.6; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  th, td { text-align: left; padding: 0.25rem 0.4rem; white-space: nowrap; }
+  th { opacity: 0.65; font-weight: 500; border-bottom: 1px solid #223140; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  .sev { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 0.6rem; font-size: 0.72rem; }
+  .sev.high { background: #4a1f24; color: #ff8a93; }
+  .sev.medium { background: #45361a; color: #e0a63c; }
+  .sev.low { background: #1a2f45; color: #4fb3e8; }
+  .alert-name { color: #4fb3e8; }
+  #alerts li { list-style: none; padding: 0.3rem 0; border-bottom: 1px solid #1c2731; font-size: 0.8rem; }
+  #alerts ul { margin: 0; padding: 0; }
 </style>
 </head>
 <body>
@@ -67,6 +85,21 @@
   <section class="chart">
     <h2>pps (last 60 samples)</h2>
     <canvas id="spark" width="600" height="90"></canvas>
+  </section>
+  <section class="panel">
+    <h2>Alerts</h2>
+    <div class="hint" id="alerts-hint">pass --events (and optionally --alerts-file) to enable</div>
+    <ul id="alerts"></ul>
+  </section>
+  <section class="panel">
+    <h2>Recent flows</h2>
+    <div class="hint" id="flows-hint">pass --events to enable</div>
+    <table id="flows">
+      <thead>
+        <tr><th>ts</th><th>proto</th><th>state</th><th>src → dst</th><th class="num">pkts</th><th class="num">bytes</th><th class="num">dur</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </section>
 </main>
 <script>
@@ -152,6 +185,60 @@
   } catch (e) {
     startPolling();
   }
+
+  function esc(text) {
+    var d = document.createElement("span");
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  function renderAlerts(alerts) {
+    document.getElementById("alerts-hint").style.display = "none";
+    var list = document.getElementById("alerts");
+    list.innerHTML = alerts.map(function (a) {
+      var where = a.dst ? esc(a.src) + " → " + esc(a.dst) : esc(a.src);
+      return "<li><span class='sev " + esc(a.severity) + "'>" + esc(a.severity) +
+        "</span> <span class='alert-name'>" + esc(a.name) + "</span> · " + where +
+        " · " + esc(a.message) + "</li>";
+    }).join("");
+  }
+
+  function renderFlows(rows) {
+    document.getElementById("flows-hint").style.display = "none";
+    var tbody = document.querySelector("#flows tbody");
+    tbody.innerHTML = rows.map(function (r) {
+      var pkts = r.pkts_a_to_b + r.pkts_b_to_a;
+      var bytes = r.bytes_a_to_b + r.bytes_b_to_a;
+      return "<tr><td class='num'>" + r.ts.toFixed(1) + "</td><td>" + esc(r.proto) +
+        "</td><td>" + esc(r.conn_state) + "</td><td>" + esc(r.src) + ":" +
+        (r.src_port === null ? "-" : r.src_port) + " → " + esc(r.dst) + ":" +
+        (r.dst_port === null ? "-" : r.dst_port) + "</td><td class='num'>" + pkts +
+        "</td><td class='num'>" + bytes + "</td><td class='num'>" +
+        r.duration.toFixed(2) + "s</td></tr>";
+    }).join("");
+  }
+
+  function disable(hintId) {
+    var hint = document.getElementById(hintId);
+    if (hint) { hint.style.display = ""; }
+  }
+
+  function fetchViews() {
+    fetch("/api/alerts").then(function (r) {
+      if (!r.ok) { disable("alerts-hint"); return null; }
+      return r.json();
+    }).then(function (a) {
+      if (a && a.length > 0) { renderAlerts(a); }
+    }).catch(function () { /* retry next round */ });
+    fetch("/api/flows").then(function (r) {
+      if (!r.ok) { disable("flows-hint"); return null; }
+      return r.json();
+    }).then(function (rows) {
+      if (rows && rows.length > 0) { renderFlows(rows); }
+    }).catch(function () { /* retry next round */ });
+  }
+  setInterval(fetchViews, 2000);
+  fetchViews();
 })();
 </script>
 </body>
