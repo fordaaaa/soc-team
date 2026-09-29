@@ -1,11 +1,13 @@
 //! DuckDB-backed [`EventStore`] behind the default-off `duckdb` feature,
 //! which vendors the full C++ engine; events are stored as JSON blobs with
-//! `(ts, kind)` extracted for filtering and conn rows re-deserialized for flows.
+//! `(ts, kind)` extracted for indexed filtering, and matching conn rows are
+//! re-deserialized only after the SQL WHERE clause has narrowed them.
 
 use std::path::Path;
 
 use crate::{EventStore, FlowFilter, FlowRow, StoreError};
-use ::duckdb::{Connection, params};
+use ::duckdb::types::Value;
+use ::duckdb::{Connection, params, params_from_iter};
 use sensor::event::Event;
 
 /// DuckDB-backed [`EventStore`] storing every event as a JSON blob.
@@ -32,7 +34,8 @@ impl DuckStore {
     ts   REAL NOT NULL,
     kind TEXT NOT NULL,
     json TEXT NOT NULL
-)",
+);
+CREATE INDEX IF NOT EXISTS events_kind_ts ON events (kind, ts);",
         )?;
         Ok(Self { conn })
     }
@@ -59,30 +62,47 @@ impl EventStore for DuckStore {
         Ok(())
     }
 
+    /// Batched write: all rows land in one transaction, so a partial
+    /// batch never persists.
+    fn append_all(&mut self, events: &[Event]) -> Result<(), StoreError> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.transaction()?;
+        for event in events {
+            let (ts, kind) = event_ts_kind(event);
+            let json = serde_json::to_string(event)?;
+            tx.execute(
+                "INSERT INTO events (ts, kind, json) VALUES (?, ?, ?)",
+                params![ts, kind, json],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     fn query_flows(&self, filter: &FlowFilter) -> Result<Vec<FlowRow>, StoreError> {
         let mut sql = String::from("SELECT json FROM events WHERE kind = 'conn'");
-        if filter.since_ts.is_some() {
+        let mut args: Vec<Value> = Vec::new();
+        if let Some(since) = filter.since_ts {
             sql.push_str(" AND ts >= ?");
+            args.push(since.into());
+        }
+        if let Some(host) = &filter.host {
+            sql.push_str(
+                " AND (json_extract_string(json, '$.src') = ? OR json_extract_string(json, '$.dst') = ?)",
+            );
+            args.push(Value::Text(host.clone()));
+            args.push(Value::Text(host.clone()));
         }
         sql.push_str(" ORDER BY rowid");
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows: Vec<String> = match filter.since_ts {
-            Some(since) => stmt
-                .query_map(params![since], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<String>, ::duckdb::Error>>()?,
-            None => stmt
-                .query_map(params![], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<String>, ::duckdb::Error>>()?,
-        };
+        let rows: Vec<String> = stmt
+            .query_map(params_from_iter(args), |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<String>, ::duckdb::Error>>()?;
         let mut out = Vec::new();
         for line in &rows {
-            let event: Event = serde_json::from_str(line)?;
-            if let Event::Conn(c) = event
-                && filter
-                    .host
-                    .as_ref()
-                    .is_none_or(|host| host == &c.src || host == &c.dst)
-            {
+            if let Event::Conn(c) = serde_json::from_str::<Event>(line)? {
                 out.push(FlowRow::from_conn(&c));
             }
         }
@@ -217,5 +237,23 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn duck_batched_append_all_persists_every_row() {
+        let mut store = DuckStore::open_in_memory().unwrap();
+        let events: Vec<Event> = (0..50)
+            .map(|i| {
+                conn(
+                    &format!("conn{i}"),
+                    100.0 + f64::from(i),
+                    "192.0.2.10",
+                    "198.51.100.7",
+                )
+            })
+            .collect();
+        store.append_all(&events).unwrap();
+        assert_eq!(store.len().unwrap(), 50);
+        assert_eq!(store.query_flows(&FlowFilter::default()).unwrap().len(), 50);
     }
 }
