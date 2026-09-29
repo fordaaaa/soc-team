@@ -51,11 +51,13 @@ impl Detection for BeaconDetector {
             let Event::Conn(conn) = event else {
                 continue;
             };
-            if (conn.proto == "tcp" || conn.proto == "udp") && conn.dst_port.is_some() {
-                groups
-                    .entry((conn.src.clone(), conn.dst.clone(), conn.dst_port.unwrap()))
-                    .or_default()
-                    .push(conn.clone());
+            if conn.proto == "tcp" || conn.proto == "udp" {
+                if let Some(port) = conn.dst_port {
+                    groups
+                        .entry((conn.src.clone(), conn.dst.clone(), port))
+                        .or_default()
+                        .push(conn.clone());
+                }
             }
         }
         let mut alerts = Vec::new();
