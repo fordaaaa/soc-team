@@ -3,6 +3,7 @@ name = "ctl"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "socteam control CLI: status, flows, tail over the sensor event stream"
 
 [[bin]]
 name = "socteam"
@@ -20,3 +21,6 @@ sensor = { path = "../sensor" }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lints]
+workspace = true

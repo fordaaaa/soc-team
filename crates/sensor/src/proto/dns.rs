@@ -56,7 +56,9 @@ pub fn parse(payload: &[u8]) -> Option<DnsSummary> {
     Some(DnsSummary {
         transaction_id: message.id(),
         is_response: message.message_type() == MessageType::Response,
-        rcode: u16::from(message.response_code()) as u8,
+        // Keep the 4-bit header rcode only: hickory folds extended OPT
+        // rcodes into the same field, and the summary models the header.
+        rcode: (u16::from(message.response_code()) & 0x0F) as u8,
         query,
         qtype,
         answers,

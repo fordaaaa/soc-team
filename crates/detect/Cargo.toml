@@ -3,7 +3,11 @@ name = "detect"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Detection engine over socteam sensor events"
 
 [lib]
 name = "detect"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

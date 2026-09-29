@@ -3,6 +3,7 @@ name = "store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Queryable event store for sensor NDJSON output (memory backend, optional DuckDB)"
 
 [lib]
 name = "store"
@@ -24,3 +25,6 @@ duckdb = { version = "1.10505", optional = true, features = ["bundled"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lints]
+workspace = true

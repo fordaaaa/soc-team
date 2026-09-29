@@ -3,6 +3,7 @@ name = "sensor"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Passive network sensor: packet capture, protocol parsing, flow table, NDJSON events"
 
 [[bin]]
 name = "socteam-sensor"
@@ -29,3 +30,6 @@ serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lints]
+workspace = true
