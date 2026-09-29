@@ -23,7 +23,12 @@ serde_json.workspace = true
 thiserror.workspace = true
 duckdb = { version = "1.10505", optional = true, features = ["bundled"] }
 
+[[bench]]
+name = "query"
+harness = false
+
 [dev-dependencies]
+criterion = "0.7"
 tempfile.workspace = true
 
 [lints]
