@@ -7,6 +7,7 @@
 
 use sensor::event::{AlertEvent, Event, Severity};
 
+pub mod arp_spoof;
 pub mod beacon;
 pub mod dns_tunnel;
 pub mod scan;
