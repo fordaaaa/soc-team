@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::{AlertFilter, EventStore, FlowFilter, FlowRow, StoreError};
 use ::duckdb::types::Value;
 use ::duckdb::{Connection, params, params_from_iter};
-use sensor::event::{AlertEvent, Event, Severity};
+use sensor::event::{AlertEvent, Event};
 
 /// DuckDB-backed [`EventStore`] storing every event as a JSON blob.
 pub struct DuckStore {

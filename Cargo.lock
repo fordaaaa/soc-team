@@ -621,7 +621,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "detect",
  "sensor",
+ "serde_json",
  "store",
  "tempfile",
 ]

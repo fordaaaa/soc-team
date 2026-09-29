@@ -13,11 +13,18 @@ path = "src/main.rs"
 name = "ctl"
 path = "src/lib.rs"
 
+[features]
+# Forwarded to the store crate; the vendored C++ engine stays default-off
+# for the aarch64 cross-check.
+duckdb = ["store/duckdb"]
+
 [dependencies]
 clap.workspace = true
 anyhow.workspace = true
 store = { path = "../store" }
 sensor = { path = "../sensor" }
+detect = { path = "../detect" }
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

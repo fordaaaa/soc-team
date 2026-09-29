@@ -2,9 +2,21 @@
 //! parsing, flow-table formatting, heartbeat summarizing — kept out of
 //! the binary so it is unit-testable.
 
-use sensor::event::{Event, HeartbeatEvent};
+pub mod demo;
+
+use sensor::event::{AlertEvent, Event, HeartbeatEvent, Severity};
 use std::time::Duration;
 use store::FlowRow;
+
+/// Parse a severity name (`low`/`medium`/`high`, case-insensitive).
+pub fn parse_severity(s: &str) -> Option<Severity> {
+    match s.trim().to_lowercase().as_str() {
+        "low" => Some(Severity::Low),
+        "medium" => Some(Severity::Medium),
+        "high" => Some(Severity::High),
+        _ => None,
+    }
+}
 
 /// Parse a `--last` duration: an integer with an optional single suffix
 /// `s`/`m`/`h` (case-insensitive). A bare number means seconds.
@@ -69,6 +81,26 @@ pub fn format_heartbeat(h: &HeartbeatEvent) -> String {
         "heartbeat ts={} frames={} bytes={} active_flows={} events={}",
         h.ts, h.total_frames, h.bytes, h.active_flows, h.events_emitted
     )
+}
+
+/// Render alert events as a fixed-width table (header plus one line per
+/// alert), joined with '\n'.
+pub fn format_alerts(alerts: &[AlertEvent]) -> String {
+    let mut out =
+        String::from("ts            severity  name            src -> dst            message");
+    for alert in alerts {
+        out.push('\n');
+        out.push_str(&format!(
+            "{:<12} {:<8} {:<14} {} -> {}  {}",
+            alert.ts,
+            format!("{:?}", alert.severity).to_lowercase(),
+            alert.name,
+            alert.src,
+            alert.dst.as_deref().unwrap_or("-"),
+            alert.message,
+        ));
+    }
+    out
 }
 
 /// The most recent heartbeat in `events`, or None when there is none.
@@ -255,5 +287,49 @@ mod tests {
         assert_eq!(lines, vec!["one".to_string(), "two".to_string()]);
         assert_eq!(consumed, 10);
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn parse_severity_names() {
+        assert_eq!(parse_severity("low"), Some(Severity::Low));
+        assert_eq!(parse_severity("MEDIUM"), Some(Severity::Medium));
+        assert_eq!(parse_severity("high"), Some(Severity::High));
+        assert_eq!(parse_severity("critical"), None);
+    }
+
+    fn sample_alert() -> AlertEvent {
+        AlertEvent {
+            uid: "alert1".to_string(),
+            ts: 1770000000.0,
+            name: "port-scan".to_string(),
+            severity: Severity::Medium,
+            src: "192.0.2.66".to_string(),
+            dst: Some("198.51.100.7".to_string()),
+            message: "15 distinct ports on 198.51.100.7 within 60s".to_string(),
+            evidence: vec!["conn1".to_string()],
+        }
+    }
+
+    #[test]
+    fn format_alerts_golden() {
+        let out = format_alerts(&[sample_alert()]);
+        let mut lines = out.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "ts            severity  name            src -> dst            message"
+        );
+        let row = lines.next().unwrap();
+        assert!(row.contains("medium   port-scan"));
+        assert!(row.contains("192.0.2.66 -> 198.51.100.7"));
+        assert!(row.contains("15 distinct ports"));
+        assert_eq!(out.lines().count(), 2);
+    }
+
+    #[test]
+    fn format_alerts_portless_dst() {
+        let mut alert = sample_alert();
+        alert.dst = None;
+        let out = format_alerts(&[alert]);
+        assert!(out.contains("192.0.2.66 -> -"));
     }
 }

@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "duckdb")]
 pub mod duckdb;
 
+#[cfg(feature = "duckdb")]
+pub use duckdb::DuckStore;
+
 /// Errors from store operations: I/O while reading event files, or a
 /// line that does not deserialize as an [`Event`].
 #[derive(Debug, thiserror::Error)]
@@ -63,7 +66,7 @@ pub struct AlertFilter {
 }
 
 /// One queried connection summary (a [`ConnEvent`] projection).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FlowRow {
     /// Unique event id.
     pub uid: String,
