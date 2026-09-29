@@ -11,3 +11,6 @@ path = "src/lib.rs"
 
 [lints]
 workspace = true
+
+[dependencies]
+sensor = { path = "../sensor" }

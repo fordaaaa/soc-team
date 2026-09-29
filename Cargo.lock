@@ -668,6 +668,9 @@ dependencies = [
 [[package]]
 name = "detect"
 version = "0.1.0"
+dependencies = [
+ "sensor",
+]
 
 [[package]]
 name = "digest"
