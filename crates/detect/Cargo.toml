@@ -14,3 +14,8 @@ workspace = true
 
 [dependencies]
 sensor = { path = "../sensor" }
+
+[dev-dependencies]
+pnet.workspace = true
+pnet_packet.workspace = true
+hickory-proto.workspace = true

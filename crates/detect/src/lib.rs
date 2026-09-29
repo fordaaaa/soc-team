@@ -13,6 +13,12 @@ pub mod dns_tunnel;
 pub mod scan;
 pub mod sni_watch;
 
+pub use arp_spoof::ArpSpoofDetector;
+pub use beacon::BeaconDetector;
+pub use dns_tunnel::DnsTunnelDetector;
+pub use scan::PortScanDetector;
+pub use sni_watch::SniWatchDetector;
+
 /// One detection rule over the event stream.
 pub trait Detection: Send {
     /// Short rule name (e.g. `port-scan`), used as the alert's `name`.
@@ -39,6 +45,18 @@ impl RuleEngine {
             detections: Vec::new(),
             next_uid: 0,
         }
+    }
+
+    /// Engine preloaded with every built-in detector at default
+    /// thresholds; the SNI watchlist starts empty.
+    pub fn with_defaults() -> Self {
+        let mut engine = Self::new();
+        engine.register(Box::new(PortScanDetector::default()));
+        engine.register(Box::new(BeaconDetector::default()));
+        engine.register(Box::new(DnsTunnelDetector::default()));
+        engine.register(Box::new(ArpSpoofDetector::default()));
+        engine.register(Box::new(SniWatchDetector::default()));
+        engine
     }
 
     /// Add a detection to the engine.
@@ -124,6 +142,13 @@ mod tests {
         assert!(engine.run(&sample_events()).is_empty());
         engine.register(Box::new(StubDetection { alerts_per_run: 1 }));
         assert_eq!(engine.len(), 1);
+    }
+
+    #[test]
+    fn with_defaults_loads_five_detections() {
+        let engine = RuleEngine::with_defaults();
+        assert_eq!(engine.len(), 5);
+        assert!(!engine.is_empty());
     }
 
     #[test]

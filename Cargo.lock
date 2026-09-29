@@ -669,6 +669,9 @@ dependencies = [
 name = "detect"
 version = "0.1.0"
 dependencies = [
+ "hickory-proto",
+ "pnet",
+ "pnet_packet",
  "sensor",
 ]
 
