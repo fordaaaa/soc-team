@@ -196,11 +196,11 @@
   <table>
     <thead><tr><th>Crate</th><th>State</th><th>Job</th></tr></thead>
     <tbody>
-      <tr><td class="mono">sensor</td><td>real, ~5,150 lines</td><td>packet sources, L2–L4 + DNS/HTTP/TLS parsers, flow table, event pipeline + NDJSON sink, the CLI binary</td></tr>
-      <tr><td class="mono">console</td><td>real, v0</td><td>axum + WebSocket dashboard of live counters</td></tr>
-      <tr><td class="mono">detect</td><td>skeleton</td><td>rule engine — phase 2</td></tr>
-      <tr><td class="mono">store</td><td>skeleton</td><td>event store — phase 1E</td></tr>
-      <tr><td class="mono">ctl</td><td>minimal</td><td>management CLI (<span class="mono">socteam version|status</span>)</td></tr>
+      <tr><td class="mono">sensor</td><td>real, ~5,300 lines</td><td>packet sources, L2–L4 + DNS/HTTP/TLS/ARP parsers, flow table, event pipeline + NDJSON sink, the CLI binary</td></tr>
+      <tr><td class="mono">console</td><td>real, v1</td><td>axum + WebSocket dashboard: live counters, recent flows, alert feed</td></tr>
+      <tr><td class="mono">detect</td><td>real, five detections</td><td>port-scan, beaconing, dns-tunnel, arp-spoof, sni-watchlist — each with purple-team tests (see <span class="mono">DETECTIONS.md</span>)</td></tr>
+      <tr><td class="mono">store</td><td>real</td><td>in-memory queries over NDJSON + DuckDB backend behind a default-off feature</td></tr>
+      <tr><td class="mono">ctl</td><td>real</td><td>management CLI (<span class="mono">socteam status|flows|alerts|detect|tail|import|demo</span>, JSON output, store selection)</td></tr>
     </tbody>
   </table>
 
