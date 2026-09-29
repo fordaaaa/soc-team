@@ -7,6 +7,7 @@
 
 use sensor::event::{AlertEvent, Event, Severity};
 
+pub mod beacon;
 pub mod scan;
 
 /// One detection rule over the event stream.
