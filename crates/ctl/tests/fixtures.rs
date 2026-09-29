@@ -2,7 +2,7 @@
 //! fire every built-in detection — CI guards the reviewer one-liner.
 
 use detect::{RuleEngine, SniWatchDetector};
-use store::MemoryStore;
+use store::{EventStore, MemoryStore};
 
 #[test]
 fn committed_demo_fixture_fires_all_detections() {
