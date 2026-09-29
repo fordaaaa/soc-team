@@ -79,6 +79,25 @@ pub fn latest_heartbeat(events: &[Event]) -> Option<&HeartbeatEvent> {
     })
 }
 
+/// Split complete lines off the front of `buffer`, returning them plus
+/// the byte count consumed (complete lines and their newlines only; the
+/// unterminated tail stays). Bookkeeping is raw bytes, so lines with
+/// invalid UTF-8 never desync the caller's file offsets — they are only
+/// lossy-decoded for display.
+pub fn drain_complete_lines(buffer: &mut Vec<u8>) -> (Vec<String>, usize) {
+    let Some(end) = buffer.iter().rposition(|&b| b == b'\n') else {
+        return (Vec::new(), 0);
+    };
+    let lines: Vec<String> = buffer[..end]
+        .split(|&b| b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| String::from_utf8_lossy(line).into_owned())
+        .collect();
+    let consumed = end + 1;
+    buffer.drain(..consumed);
+    (lines, consumed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +217,43 @@ mod tests {
         let got = latest_heartbeat(&events).expect("heartbeat expected");
         assert_eq!(got.ts, 200.0);
         assert!(latest_heartbeat(&[dns]).is_none());
+    }
+
+    #[test]
+    fn drain_complete_lines_splits_and_advances() {
+        let mut buffer = b"a\nbb\nccc".to_vec();
+        let (lines, consumed) = drain_complete_lines(&mut buffer);
+        assert_eq!(lines, vec!["a".to_string(), "bb".to_string()]);
+        assert_eq!(consumed, 5);
+        assert_eq!(buffer, b"ccc");
+    }
+
+    #[test]
+    fn drain_complete_lines_no_newline_consumes_nothing() {
+        let mut buffer = b"partial line".to_vec();
+        let (lines, consumed) = drain_complete_lines(&mut buffer);
+        assert!(lines.is_empty());
+        assert_eq!(consumed, 0);
+        assert_eq!(buffer, b"partial line");
+    }
+
+    #[test]
+    fn drain_complete_lines_invalid_utf8_keeps_byte_offsets() {
+        // The invalid byte \xff renders as a 3-byte U+FFFD replacement
+        // char, but the consumed count must stay in raw file bytes.
+        let mut buffer = b"hi \xff there\nnext".to_vec();
+        let (lines, consumed) = drain_complete_lines(&mut buffer);
+        assert_eq!(lines, vec!["hi \u{FFFD} there".to_string()]);
+        assert_eq!(consumed, 11);
+        assert_eq!(buffer, b"next");
+    }
+
+    #[test]
+    fn drain_complete_lines_skips_empty_lines() {
+        let mut buffer = b"one\n\n\ntwo\n".to_vec();
+        let (lines, consumed) = drain_complete_lines(&mut buffer);
+        assert_eq!(lines, vec!["one".to_string(), "two".to_string()]);
+        assert_eq!(consumed, 10);
+        assert!(buffer.is_empty());
     }
 }

@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use ctl::{format_flows, format_heartbeat, latest_heartbeat, parse_duration};
+use ctl::{drain_complete_lines, format_flows, format_heartbeat, latest_heartbeat, parse_duration};
 use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -101,8 +101,10 @@ fn run_flows(events: &Path, last: Option<&str>, host: Option<&str>) -> Result<()
 
 /// Follow `dir`: poll every 500 ms, print each complete new NDJSON line.
 /// Only stdout carries event lines (pipeable); diagnostics go to stderr.
-/// Files that disappear or fail to open mid-follow are skipped for that
-/// iteration — rotation never deletes files, so this is defensive only.
+/// File offsets are tracked in raw bytes so invalid UTF-8 in a payload
+/// never desyncs the follower. Files that disappear or fail to open
+/// mid-follow are skipped for that iteration — rotation never deletes
+/// files, so this is defensive only.
 fn run_tail(dir: &Path) -> Result<()> {
     eprintln!("tailing {} (ctrl-c to stop)", dir.display());
     let stdout = std::io::stdout();
@@ -110,7 +112,7 @@ fn run_tail(dir: &Path) -> Result<()> {
     // Byte offsets of fully-consumed complete lines, per file.
     let mut offsets: BTreeMap<PathBuf, u64> = BTreeMap::new();
     // Trailing bytes not yet newline-terminated, per file.
-    let mut partials: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let mut partials: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
 
     loop {
         let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
@@ -139,28 +141,17 @@ fn run_tail(dir: &Path) -> Result<()> {
                 continue;
             }
             let buffer = partials.entry(path.clone()).or_default();
-            buffer.push_str(&String::from_utf8_lossy(&new_bytes));
-
-            // Print every complete line; keep the un-terminated tail.
-            // Offsets advance only over complete lines plus their
-            // newlines, never over the partial remainder. Write errors
-            // (e.g. a closed pipe) are ignored: tail has nothing to clean up.
-            let consumed = match buffer.rfind('\n') {
-                Some(idx) => {
-                    let complete = buffer[..idx].to_string();
-                    for line in complete.split('\n') {
-                        if !line.is_empty() {
-                            let _ = writeln!(out, "{line}");
-                        }
-                    }
-                    let _ = out.flush();
-                    let consumed = idx + 1;
-                    buffer.drain(..consumed);
-                    offset + consumed as u64
+            buffer.extend_from_slice(&new_bytes);
+            let (lines, consumed) = drain_complete_lines(buffer);
+            if !lines.is_empty() {
+                // Write errors (e.g. a closed pipe) are ignored: tail has
+                // nothing to clean up.
+                for line in &lines {
+                    let _ = writeln!(out, "{line}");
                 }
-                None => offset,
-            };
-            offsets.insert(path, consumed);
+                let _ = out.flush();
+            }
+            offsets.insert(path, offset + consumed as u64);
         }
 
         std::thread::sleep(std::time::Duration::from_millis(500));
