@@ -152,7 +152,7 @@ impl EventStore for DuckStore {
 mod tests {
     use super::*;
     use crate::{EventStore, FlowFilter};
-    use sensor::event::{ConnEvent, DnsEvent, Event, HeartbeatEvent};
+    use sensor::event::{ConnEvent, DnsEvent, Event, HeartbeatEvent, Severity};
     use tempfile;
 
     fn conn(uid: &str, ts: f64, src: &str, dst: &str) -> Event {
