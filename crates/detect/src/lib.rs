@@ -11,6 +11,7 @@ pub mod arp_spoof;
 pub mod beacon;
 pub mod dns_tunnel;
 pub mod scan;
+pub mod sni_watch;
 
 /// One detection rule over the event stream.
 pub trait Detection: Send {
