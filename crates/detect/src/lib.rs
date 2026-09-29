@@ -7,6 +7,8 @@
 
 use sensor::event::{AlertEvent, Event, Severity};
 
+pub mod scan;
+
 /// One detection rule over the event stream.
 pub trait Detection: Send {
     /// Short rule name (e.g. `port-scan`), used as the alert's `name`.
