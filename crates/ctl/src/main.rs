@@ -90,7 +90,7 @@ fn run_flows(events: &Path, last: Option<&str>, host: Option<&str>) -> Result<()
     let mut store = MemoryStore::new();
     store::load_dir(&mut store, events)
         .with_context(|| format!("failed to load events from '{}'", events.display()))?;
-    let rows = store.query_flows(&filter);
+    let rows = store.query_flows(&filter)?;
     if rows.is_empty() {
         println!("no flows matched (--events {})", events.display());
     } else {

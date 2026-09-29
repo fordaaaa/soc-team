@@ -120,14 +120,14 @@ pub trait EventStore: Send {
     }
 
     /// Conn events passing `filter`, in append order.
-    fn query_flows(&self, filter: &FlowFilter) -> Vec<FlowRow>;
+    fn query_flows(&self, filter: &FlowFilter) -> Result<Vec<FlowRow>, StoreError>;
 
     /// Total events stored (all kinds).
-    fn len(&self) -> usize;
+    fn len(&self) -> Result<usize, StoreError>;
 
     /// True when no events are stored.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn is_empty(&self) -> Result<bool, StoreError> {
+        Ok(self.len()? == 0)
     }
 }
 
@@ -161,8 +161,9 @@ impl EventStore for MemoryStore {
         Ok(())
     }
 
-    fn query_flows(&self, filter: &FlowFilter) -> Vec<FlowRow> {
-        self.events
+    fn query_flows(&self, filter: &FlowFilter) -> Result<Vec<FlowRow>, StoreError> {
+        let rows: Vec<FlowRow> = self
+            .events
             .iter()
             .filter_map(|event| match event {
                 Event::Conn(c) => {
@@ -175,11 +176,12 @@ impl EventStore for MemoryStore {
                 }
                 _ => None,
             })
-            .collect()
+            .collect();
+        Ok(rows)
     }
 
-    fn len(&self) -> usize {
-        self.events.len()
+    fn len(&self) -> Result<usize, StoreError> {
+        Ok(self.events.len())
     }
 }
 
@@ -271,9 +273,9 @@ mod tests {
             dns("dns1"),
         ];
         store.append_all(&events).unwrap();
-        assert_eq!(store.len(), 3);
+        assert_eq!(store.len().unwrap(), 3);
 
-        let rows = store.query_flows(&FlowFilter::default());
+        let rows = store.query_flows(&FlowFilter::default()).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].uid, "conn1");
         assert_eq!(rows[1].uid, "conn2");
@@ -290,19 +292,19 @@ mod tests {
             host: Some("192.0.2.10".to_string()),
             ..FlowFilter::default()
         };
-        assert_eq!(store.query_flows(&by_src).len(), 1);
+        assert_eq!(store.query_flows(&by_src).unwrap().len(), 1);
 
         let by_dst = FlowFilter {
             host: Some("198.51.100.7".to_string()),
             ..FlowFilter::default()
         };
-        assert_eq!(store.query_flows(&by_dst).len(), 1);
+        assert_eq!(store.query_flows(&by_dst).unwrap().len(), 1);
 
         let other = FlowFilter {
             host: Some("203.0.113.9".to_string()),
             ..FlowFilter::default()
         };
-        assert_eq!(store.query_flows(&other).len(), 0);
+        assert_eq!(store.query_flows(&other).unwrap().len(), 0);
     }
 
     #[test]
@@ -316,13 +318,13 @@ mod tests {
             since_ts: Some(100.0),
             ..FlowFilter::default()
         };
-        assert_eq!(store.query_flows(&equal).len(), 1);
+        assert_eq!(store.query_flows(&equal).unwrap().len(), 1);
 
         let above = FlowFilter {
             since_ts: Some(100.5),
             ..FlowFilter::default()
         };
-        assert_eq!(store.query_flows(&above).len(), 0);
+        assert_eq!(store.query_flows(&above).unwrap().len(), 0);
     }
 
     #[test]
@@ -345,8 +347,8 @@ mod tests {
 
         let mut store = MemoryStore::new();
         load_file(&mut store, &path).unwrap();
-        assert_eq!(store.len(), 2);
-        assert_eq!(store.query_flows(&FlowFilter::default()).len(), 1);
+        assert_eq!(store.len().unwrap(), 2);
+        assert_eq!(store.query_flows(&FlowFilter::default()).unwrap().len(), 1);
     }
 
     #[test]
@@ -396,8 +398,8 @@ mod tests {
 
         let mut store = MemoryStore::new();
         load_dir(&mut store, tmp.path()).unwrap();
-        assert_eq!(store.len(), 2);
-        let rows = store.query_flows(&FlowFilter::default());
+        assert_eq!(store.len().unwrap(), 2);
+        let rows = store.query_flows(&FlowFilter::default()).unwrap();
         assert_eq!(rows[0].uid, "conn1");
         assert_eq!(rows[1].uid, "conn2");
     }

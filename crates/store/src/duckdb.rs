@@ -59,41 +59,24 @@ impl EventStore for DuckStore {
         Ok(())
     }
 
-    fn query_flows(&self, filter: &FlowFilter) -> Vec<FlowRow> {
+    fn query_flows(&self, filter: &FlowFilter) -> Result<Vec<FlowRow>, StoreError> {
         let mut sql = String::from("SELECT json FROM events WHERE kind = 'conn'");
         if filter.since_ts.is_some() {
             sql.push_str(" AND ts >= ?");
         }
         sql.push_str(" ORDER BY rowid");
-        let Ok(mut stmt) = self.conn.prepare(&sql) else {
-            return Vec::new();
-        };
-        let rows: Vec<String> = if let Some(since) = filter.since_ts {
-            let mapped = match stmt.query_map(params![since], |row| row.get::<_, String>(0)) {
-                Ok(mapped) => mapped,
-                Err(_) => return Vec::new(),
-            };
-            match mapped.collect::<Result<Vec<String>, ::duckdb::Error>>() {
-                Ok(rows) => rows,
-                Err(_) => return Vec::new(),
-            }
-        } else {
-            let mapped = match stmt.query_map(params![], |row| row.get::<_, String>(0)) {
-                Ok(mapped) => mapped,
-                Err(_) => return Vec::new(),
-            };
-            match mapped.collect::<Result<Vec<String>, ::duckdb::Error>>() {
-                Ok(rows) => rows,
-                Err(_) => return Vec::new(),
-            }
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows: Vec<String> = match filter.since_ts {
+            Some(since) => stmt
+                .query_map(params![since], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<String>, ::duckdb::Error>>()?,
+            None => stmt
+                .query_map(params![], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<String>, ::duckdb::Error>>()?,
         };
         let mut out = Vec::new();
         for line in &rows {
-            let event: Event = match serde_json::from_str(line) {
-                Ok(event) => event,
-                // Rows are validated at write time, so this is defensive-only.
-                Err(_) => continue,
-            };
+            let event: Event = serde_json::from_str(line)?;
             if let Event::Conn(c) = event
                 && filter
                     .host
@@ -103,18 +86,14 @@ impl EventStore for DuckStore {
                 out.push(FlowRow::from_conn(&c));
             }
         }
-        out
+        Ok(out)
     }
 
-    fn len(&self) -> usize {
-        match self
+    fn len(&self) -> Result<usize, StoreError> {
+        let n: i64 = self
             .conn
-            .query_row("SELECT COUNT(*) FROM events", [], |row| {
-                row.get::<_, i64>(0)
-            }) {
-            Ok(n) => n as usize,
-            Err(_) => 0,
-        }
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))?;
+        Ok(usize::try_from(n).unwrap_or(0))
     }
 }
 
@@ -171,9 +150,9 @@ mod tests {
                 dns("dns1"),
             ])
             .unwrap();
-        assert_eq!(store.len(), 3);
+        assert_eq!(store.len().unwrap(), 3);
 
-        let rows = store.query_flows(&FlowFilter::default());
+        let rows = store.query_flows(&FlowFilter::default()).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].uid, "conn1");
         assert_eq!(rows[1].uid, "conn2");
@@ -182,7 +161,7 @@ mod tests {
             since_ts: Some(101.0),
             ..FlowFilter::default()
         };
-        let rows = store.query_flows(&since);
+        let rows = store.query_flows(&since).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].uid, "conn2");
 
@@ -190,7 +169,7 @@ mod tests {
             since_ts: Some(100.5),
             ..FlowFilter::default()
         };
-        let rows = store.query_flows(&since);
+        let rows = store.query_flows(&since).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].uid, "conn2");
 
@@ -198,7 +177,7 @@ mod tests {
             host: Some("192.0.2.10".to_string()),
             ..FlowFilter::default()
         };
-        let rows = store.query_flows(&host);
+        let rows = store.query_flows(&host).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].uid, "conn1");
     }
@@ -212,11 +191,11 @@ mod tests {
             store
                 .append(&conn("conn1", 100.0, "192.0.2.10", "198.51.100.7"))
                 .unwrap();
-            assert_eq!(store.len(), 1);
+            assert_eq!(store.len().unwrap(), 1);
         }
         let store = DuckStore::open(&path).unwrap();
-        assert_eq!(store.len(), 1);
-        assert_eq!(store.query_flows(&FlowFilter::default()).len(), 1);
+        assert_eq!(store.len().unwrap(), 1);
+        assert_eq!(store.query_flows(&FlowFilter::default()).unwrap().len(), 1);
     }
 
     #[test]
@@ -231,7 +210,12 @@ mod tests {
                 events_emitted: 1,
             }))
             .unwrap();
-        assert_eq!(store.len(), 1);
-        assert!(store.query_flows(&FlowFilter::default()).is_empty());
+        assert_eq!(store.len().unwrap(), 1);
+        assert!(
+            store
+                .query_flows(&FlowFilter::default())
+                .unwrap()
+                .is_empty()
+        );
     }
 }
