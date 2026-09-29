@@ -1,0 +1,3 @@
+# one domain per line
+nasty.example
+evilsite.example
