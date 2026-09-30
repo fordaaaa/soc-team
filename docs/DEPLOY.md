@@ -98,16 +98,31 @@ the systemd unit keeps the bind loopback-only, so reach it over SSH port
 forwarding (`ssh -L 8080:localhost:8080 pi`) or put it behind your own
 auth before exposing it.
 
-## 4. Alerts on your phone (ntfy)
+## 4. Alerts on your phone
 
-1. Install the ntfy app ([ntfy.sh](https://ntfy.sh), or self-host the
-   container for zero cloud).
-2. In the app, subscribe to the same `ntfy_topic` string from the config.
-   Make it long and random — the topic name *is* the access credential.
-3. That's it. Port scans, ARP spoofs, beaconing callbacks, DNS tunnels,
-   and watched TLS names push as they fire (severity-mapped priority),
-   and `sensor-blind` tells you when capture dies — unplug the mirror
-   port and watch your phone 15 minutes later.
+Two channels, both optional, both can run together:
+
+**ntfy (push notifications).** Install the ntfy app
+([ntfy.sh](https://ntfy.sh), or self-host for zero cloud), subscribe to
+the `ntfy_topic` from the config (make it long and random — the topic
+name *is* the credential), and detections push as they fire with
+severity-mapped priority.
+
+**Real text messages (email-to-SMS).** Every major carrier runs an email
+gateway that delivers to your phone as SMS — free, no API account:
+
+| Carrier | Address |
+|---|---|
+| Verizon | `5551234567@vtext.com` |
+| AT&T | `5551234567@txt.att.net` |
+| T-Mobile | `5551234567@tmomail.net` |
+| Google Fi | `5551234567@msg.fi.google.com` |
+
+Set the `[alert] mail_*` fields in the config (any SMTP account works;
+Gmail needs an app password). Point `mail_to` at your gateway address
+and every alert — including `new-device`, the "someone new joined my
+network" text — arrives as an SMS. Keep the config file root-only
+(`chmod 600`) since it holds the SMTP password.
 
 Verify the whole chain without touching your network:
 

@@ -15,6 +15,7 @@ No detection is documented here without a test that proves it.
 | DNS tunneling | `dns-tunnel` | DNS | high | label >45 chars, or 20 distinct TXT queries in 60s | unit + purple |
 | ARP spoofing | `arp-spoof` | ARP (L2) | high | 2 MACs claim one IP in 300s, or 10 gratuitous in 10s | unit + purple |
 | SNI watchlist | `sni-watchlist` | TLS metadata | medium | operator-supplied domain list | unit + purple |
+| New device | `new-device` | ARP (L2) | medium | first-seen MAC, rate-limited to 1/min | unit + e2e |
 
 ## How the engine works
 
@@ -103,6 +104,21 @@ empty: this rule only fires when you give it domains, via
 `--watchlist` (one domain per line, `#` comments) or by registering
 `SniWatchDetector::new(vec![...])`. **Proven by**: `watched_sni_fires`,
 `suffix_lookalike_does_not_match`, `case_insensitive_and_deduped`.
+
+## New device (`new-device`)
+
+The sensor learns device identity from ARP traffic (sender MAC + claimed
+IP), persists what it knows to `devices.json` beside the event files,
+and fires a `new-device` alert the first time an unknown MAC appears —
+"something new just joined the network." MACs are the identity (IPs
+churn with DHCP); a known device moving to a new IP updates its hint
+without alerting. Bursts of unknown MACs — MAC randomization on modern
+phones, or synthetic traffic — are learned silently and reported at most
+once per minute, so privacy features don't cause alert storms. **Proven
+by**: `first_sighting_alerts_once`, `ip_change_updates_hint_without_alert`,
+`alert_bursts_are_rate_limited_but_learned`,
+`persistence_roundtrip_and_corrupt_reset`; e2e: two identical sim runs
+alert once, then never again.
 
 ## Known limits (honesty section)
 
