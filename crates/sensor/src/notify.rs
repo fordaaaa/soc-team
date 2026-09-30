@@ -1,7 +1,8 @@
-//! ntfy alert push: one blocking HTTP POST per alert.
+//! Alert delivery: ntfy push and/or SMTP email, dispatched to every
+//! configured channel.
 //!
 //! Delivery is best-effort by design: a push failure logs and moves on —
-//! alerting must never stall packet capture. Pushes happen synchronously
+//! alerting must never stall packet capture. Sends happen synchronously
 //! on the sensor's status tick, so the hard-exit shutdown path is safe.
 
 use events::{AlertEvent, Severity};
@@ -13,6 +14,17 @@ pub struct Ntfy {
     url: String,
     topic: String,
     timeout: Duration,
+}
+
+/// SMTP mailer for one destination address (typically the carrier's
+/// email-to-SMS gateway, so alerts arrive as text messages).
+#[derive(Debug, Clone)]
+pub struct SmtpMailer {
+    host: String,
+    username: String,
+    password: String,
+    from: String,
+    to: String,
 }
 
 /// ntfy priority mapped from alert severity.
@@ -71,6 +83,124 @@ impl Ntfy {
     }
 }
 
+impl SmtpMailer {
+    /// Mailer for `host` (e.g. `smtp.gmail.com:465`) authenticated as
+    /// `username`/`password`, sending from `from` to `to`.
+    pub fn new(host: &str, username: &str, password: &str, from: &str, to: &str) -> Self {
+        Self {
+            host: host.to_string(),
+            username: username.to_string(),
+            password: password.to_string(),
+            from: from.to_string(),
+            to: to.to_string(),
+        }
+    }
+
+    /// Destination address (tested without any network).
+    pub fn recipient(&self) -> &str {
+        &self.to
+    }
+
+    /// Subject line for one alert.
+    pub fn subject(alert: &AlertEvent) -> String {
+        format!("socteam {} [{}]", alert.name, severity_word(alert.severity))
+    }
+
+    /// Send one alert as a plain-text email.
+    pub fn publish(&self, alert: &AlertEvent) -> Result<(), String> {
+        use lettre::message::header::ContentType;
+        use lettre::transport::smtp::authentication::Credentials;
+        use lettre::{Message, SmtpTransport, Transport};
+
+        let email = Message::builder()
+            .from(
+                self.from
+                    .parse()
+                    .map_err(|e| format!("bad from addr: {e}"))?,
+            )
+            .to(self.to.parse().map_err(|e| format!("bad to addr: {e}"))?)
+            .subject(Self::subject(alert))
+            .header(ContentType::TEXT_PLAIN)
+            .body(push_body(alert))
+            .map_err(|e| e.to_string())?;
+        let (server, port) = split_host_port(&self.host);
+        let creds = Credentials::new(self.username.clone(), self.password.clone());
+        let mailer = SmtpTransport::starttls_relay(&server)
+            .map_err(|e| e.to_string())?
+            .port(port)
+            .credentials(creds)
+            .build();
+        mailer.send(&email).map_err(|e| e.to_string()).map(|_| ())
+    }
+}
+
+/// One delivery channel.
+#[derive(Debug, Clone)]
+pub enum Channel {
+    /// ntfy push (phone notification).
+    Ntfy(Ntfy),
+    /// SMTP email (use an email-to-SMS gateway to get texts).
+    Mail(SmtpMailer),
+}
+
+/// Publishes each alert to every configured channel; per-channel
+/// failures are reported and never abort the rest.
+#[derive(Debug, Clone, Default)]
+pub struct Dispatch {
+    channels: Vec<Channel>,
+}
+
+impl Dispatch {
+    /// An empty dispatch (everything disabled).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a channel.
+    pub fn add(&mut self, channel: Channel) {
+        self.channels.push(channel);
+    }
+
+    /// Number of configured channels.
+    pub fn len(&self) -> usize {
+        self.channels.len()
+    }
+
+    /// True when nothing is configured.
+    pub fn is_empty(&self) -> bool {
+        self.channels.is_empty()
+    }
+
+    /// Deliver one alert to every channel; returns one error line per
+    /// failed channel (empty = fully delivered).
+    pub fn publish(&self, alert: &AlertEvent) -> Vec<String> {
+        self.channels
+            .iter()
+            .filter_map(|channel| match channel {
+                Channel::Ntfy(ntfy) => ntfy.publish(alert).err(),
+                Channel::Mail(mail) => mail.publish(alert).err(),
+            })
+            .collect()
+    }
+}
+
+/// Lowercase severity word for subjects/lines.
+fn severity_word(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Low => "low",
+        Severity::Medium => "medium",
+        Severity::High => "high",
+    }
+}
+
+/// Split `host:port` with a 465 (implicit TLS) default.
+fn split_host_port(host: &str) -> (String, u16) {
+    match host.rsplit_once(':') {
+        Some((server, port)) => (server.to_string(), port.parse().unwrap_or(465)),
+        None => (host.to_string(), 465),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +222,45 @@ mod tests {
     fn endpoint_joins_without_double_slash() {
         let ntfy = Ntfy::new("https://ntfy.sh/", "home-soc");
         assert_eq!(ntfy.endpoint(), "https://ntfy.sh/home-soc");
+    }
+
+    #[test]
+    fn smtp_recipient_and_subject() {
+        let mailer = SmtpMailer::new(
+            "smtp.gmail.com:587",
+            "sensor@example.com",
+            "app-password",
+            "sensor@example.com",
+            "5551234567@vtext.com",
+        );
+        assert_eq!(mailer.recipient(), "5551234567@vtext.com");
+        assert_eq!(
+            SmtpMailer::subject(&alert(Severity::High)),
+            "socteam port-scan [high]"
+        );
+    }
+
+    #[test]
+    fn dispatch_reports_failures_without_aborting() {
+        // A mailer pointed at an unreachable localhost port: must fail,
+        // and the dispatch must carry the error back.
+        let mut dispatch = Dispatch::new();
+        dispatch.add(Channel::Mail(SmtpMailer::new(
+            "127.0.0.1:1",
+            "u",
+            "p",
+            "from@example.com",
+            "to@example.com",
+        )));
+        let errors = dispatch.publish(&alert(Severity::Low));
+        assert_eq!(errors.len(), 1, "expected the mail failure reported");
+    }
+
+    #[test]
+    fn empty_dispatch_is_a_noop() {
+        let dispatch = Dispatch::new();
+        assert!(dispatch.is_empty());
+        assert!(dispatch.publish(&alert(Severity::Low)).is_empty());
     }
 
     #[test]

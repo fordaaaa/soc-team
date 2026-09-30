@@ -23,6 +23,13 @@ max_age_secs = 604800                 # one week
 # ntfy_url = "https://ntfy.sh"
 # ntfy_topic = "your-private-topic-name"
 blind_secs = 900                      # alert after 15 min of zero traffic
+# Email alerts (also fine as your only channel). Point mail_to at your
+# carrier's email-to-SMS gateway and alerts arrive as text messages.
+# mail_host = "smtp.gmail.com:587"
+# mail_user = "socteam-alerts@gmail.com"
+# mail_pass = "your-app-password"     # keep this file root-only (0600)
+# mail_from = "socteam-alerts@gmail.com"
+# mail_to = "5551234567@vtext.com"    # Verizon; see DEPLOY.md for others
 
 [detect]
 live_window_secs = 600.0              # event history the live engine scans

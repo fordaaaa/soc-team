@@ -66,6 +66,18 @@ pub struct AlertSection {
     pub ntfy_topic: Option<String>,
     /// Self-watch: fire an alert after this many seconds with zero frames.
     pub blind_secs: Option<u64>,
+    /// SMTP host for email alerts (e.g. `smtp.gmail.com:587`).
+    pub mail_host: Option<String>,
+    /// SMTP username (an app password for Gmail et al.).
+    pub mail_user: Option<String>,
+    /// SMTP password. Stored in plain text in this file — keep the file
+    /// root-only (0600) and prefer a throwaway account.
+    pub mail_pass: Option<String>,
+    /// Envelope-from address for email alerts.
+    pub mail_from: Option<String>,
+    /// Destination address; use your carrier's email-to-SMS gateway
+    /// (e.g. 5551234567@vtext.com) to receive alerts as texts.
+    pub mail_to: Option<String>,
 }
 
 /// `[detect]` section: live detection tuning.
