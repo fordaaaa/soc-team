@@ -14,6 +14,7 @@ use detect::LiveEngine;
 use sensor::count::LinkCounter;
 use sensor::event::{Event, EventPipeline, NdjsonSink, unix_ts};
 use sensor::iface::list_interfaces;
+use sensor::inventory::Inventory;
 use sensor::notify::{Channel, Dispatch, Ntfy};
 use sensor::source::{
     DatalinkSource, PacketSource, PcapSource, SimSource, SourceItem, now_iso8601,
@@ -290,6 +291,20 @@ fn run() -> Result<()> {
         ),
         None => None,
     };
+    // Device inventory lives beside the events (retention only sweeps
+    // *.ndjson, so devices.json is never collected).
+    let inventory_path = events.as_ref().map(|dir| dir.join("devices.json"));
+    let mut inventory = inventory_path
+        .as_deref()
+        .map(Inventory::load)
+        .map(|(inv, err)| {
+            if let Some(e) = err {
+                tracing::warn!(error = %e, "inventory state unreadable; starting fresh");
+            }
+            inv
+        })
+        .unwrap_or_default();
+
     let tick = Duration::from_secs(interval);
     let mut deadline = Instant::now() + tick;
     let mut eof = false;
@@ -309,7 +324,7 @@ fn run() -> Result<()> {
                 counter.record_frame(&pkt.data);
                 let events =
                     pipeline.observe(pkt.timestamp, u64::from(pkt.original_len), &pkt.data);
-                ingest(&mut live, &mut sink, events)?;
+                ingest(&mut live, &mut sink, &mut inventory, &notify, events)?;
                 if let Some(max) = args.max_packets
                     && counter.snapshot().total_frames >= max
                 {
@@ -330,8 +345,20 @@ fn run() -> Result<()> {
                 print_status(&mut counter);
                 deadline = Instant::now() + tick;
                 let now = SystemTime::now();
-                ingest(&mut live, &mut sink, pipeline.expire(now))?;
-                ingest(&mut live, &mut sink, vec![pipeline.heartbeat(now)])?;
+                ingest(
+                    &mut live,
+                    &mut sink,
+                    &mut inventory,
+                    &notify,
+                    pipeline.expire(now),
+                )?;
+                ingest(
+                    &mut live,
+                    &mut sink,
+                    &mut inventory,
+                    &notify,
+                    vec![pipeline.heartbeat(now)],
+                )?;
                 if let Some(sink) = &mut sink {
                     match sink.enforce_retention(now) {
                         Ok(0) => {}
@@ -340,6 +367,11 @@ fn run() -> Result<()> {
                     }
                 }
                 emit_alerts(&mut live, &mut sink, &notify, now)?;
+                if let Some(path) = &inventory_path
+                    && let Err(e) = inventory.save(path)
+                {
+                    tracing::warn!(error = %e, "inventory save failed");
+                }
                 // Self-watch: a live sensor that sees zero frames for
                 // blind_secs is probably unplugged or mis-mirrored; say so
                 // (pnet exposes no drop counters, so blindness is the
@@ -381,9 +413,20 @@ fn run() -> Result<()> {
     print_summary(&counter);
     // Drain remaining flows and flush before any non-EOF exit: the sink's
     // BufWriter would not run its Drop on `process::exit` below.
-    ingest(&mut live, &mut sink, pipeline.finish())?;
+    ingest(
+        &mut live,
+        &mut sink,
+        &mut inventory,
+        &notify,
+        pipeline.finish(),
+    )?;
     // Final scan: alerts still pending in the live window fire before exit.
     emit_alerts(&mut live, &mut sink, &notify, SystemTime::now())?;
+    if let Some(path) = &inventory_path
+        && let Err(e) = inventory.save(path)
+    {
+        tracing::warn!(error = %e, "inventory save failed");
+    }
     if let Some(sink) = &mut sink {
         sink.flush().context("failed to flush event sink")?;
         println!(
@@ -409,14 +452,34 @@ fn run() -> Result<()> {
 
 /// Feed events to the live detection window and the event sink; either
 /// side may be disabled, in which case it is skipped.
+#[allow(clippy::too_many_arguments)]
 fn ingest(
     live: &mut Option<LiveEngine>,
     sink: &mut Option<NdjsonSink>,
+    inventory: &mut Inventory,
+    notify: &Dispatch,
     events: Vec<Event>,
 ) -> Result<()> {
     for event in &events {
         if let Some(live) = live {
             live.push(event);
+        }
+        if let Some(alert) = inventory.observe(event) {
+            println!(
+                "{} ALERT {} [{}] {}: {}",
+                now_iso8601(),
+                alert.name,
+                format!("{:?}", alert.severity).to_lowercase(),
+                alert.src,
+                alert.message
+            );
+            if let Some(sink) = sink {
+                sink.write(&Event::Alert(alert.clone()))
+                    .context("failed to write alert to NDJSON sink")?;
+            }
+            for e in notify.publish(&alert) {
+                tracing::warn!(error = %e, "new-device delivery failed");
+            }
         }
         if let Some(sink) = sink {
             sink.write(event)
