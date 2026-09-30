@@ -26,6 +26,26 @@ jobs:
       - run: cargo clippy -p store --all-targets --features duckdb -- -D warnings
       - run: cargo test -p store --features duckdb
 
+  release-arm64:
+    # Native aarch64 build (the Raspberry Pi target) packaged as a tarball.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p sensor -p ctl -p console
+      - name: package
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          mkdir -p dist
+          cp target/release/socteam-sensor target/release/socteam target/release/socteam-console dist/
+          cp deploy/socteam.toml.example dist/
+          tar -czf "socteam-arm64-${VERSION}.tar.gz" -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: socteam-arm64
+          path: socteam-arm64-*.tar.gz
+
   cross-check-aarch64:
     runs-on: ubuntu-latest
     steps:

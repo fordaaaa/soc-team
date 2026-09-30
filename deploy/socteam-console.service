@@ -1,0 +1,21 @@
+[Unit]
+Description=socteam web console
+After=network.target socteam-sensor.service
+Wants=socteam-sensor.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/socteam-console --events /var/lib/socteam/events --no-open
+Restart=on-failure
+RestartSec=5
+
+# Hardening: loopback-only bind, no capabilities needed at all.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/var/lib/socteam
+
+[Install]
+WantedBy=multi-user.target

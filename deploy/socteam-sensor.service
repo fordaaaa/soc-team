@@ -1,0 +1,27 @@
+[Unit]
+Description=socteam passive network sensor
+After=network.target
+Documentation=file:/etc/socteam/socteam.toml
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/socteam-sensor --config /etc/socteam/socteam.toml
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the sensor never needs root, only raw capture.
+DynamicUser=yes
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_PACKET AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/socteam
+StateDirectory=socteam
+
+[Install]
+WantedBy=multi-user.target
