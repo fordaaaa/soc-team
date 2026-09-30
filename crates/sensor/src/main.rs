@@ -248,9 +248,13 @@ fn run() -> Result<()> {
 
     let mut counter = LinkCounter::new();
     let mut pipeline = EventPipeline::new(Duration::from_secs(60), Duration::from_secs(3600));
+    let retention = sensor::event::RetentionPolicy::new(
+        cfg.and_then(|c| c.retention.max_dir_bytes),
+        cfg.and_then(|c| c.retention.max_age_secs),
+    );
     let mut sink = match &events {
         Some(dir) => Some(
-            NdjsonSink::create(dir, "events", rotate_bytes)
+            NdjsonSink::create_with_retention(dir, "events", rotate_bytes, retention)
                 .with_context(|| format!("failed to create event sink in '{}'", dir.display()))?,
         ),
         None => None,
@@ -294,6 +298,13 @@ fn run() -> Result<()> {
                 let now = SystemTime::now();
                 write_events(&mut sink, pipeline.expire(now))?;
                 write_events(&mut sink, vec![pipeline.heartbeat(now)])?;
+                if let Some(sink) = &mut sink {
+                    match sink.enforce_retention(now) {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!(deleted = n, "retention swept event files"),
+                        Err(e) => tracing::warn!(error = %e, "retention sweep failed"),
+                    }
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 eof = true;

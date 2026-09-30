@@ -5,7 +5,7 @@ pub mod pipeline;
 pub mod sink;
 
 pub use pipeline::EventPipeline;
-pub use sink::NdjsonSink;
+pub use sink::{NdjsonSink, RetentionPolicy};
 
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
