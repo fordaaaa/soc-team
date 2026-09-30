@@ -404,6 +404,26 @@ mod tests {
     }
 
     #[test]
+    fn retention_scale_500_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Pre-make 500 rotated 4 KiB files with names that sort after the
+        // current one (simulating a long-running dir).
+        for i in 0..500u64 {
+            let name = format!("events-{}-{:04}.ndjson", 1_000_000 + i, i + 2);
+            std::fs::write(tmp.path().join(name), vec![b'x'; 4096]).unwrap();
+        }
+        let policy = RetentionPolicy::new(Some(20_000), Some(3_600));
+        let mut sink =
+            NdjsonSink::create_with_retention(tmp.path(), "events", 1_000_000, policy).unwrap();
+        sink.write(&hb(1.0)).unwrap();
+        sink.flush().unwrap();
+        let deleted = sink.enforce_retention(SystemTime::now()).unwrap();
+        assert!(deleted >= 490, "expected mass deletion, got {deleted}");
+        let remaining = sink_files_sorted(tmp.path(), "events").len();
+        assert!(remaining <= 8, "too many files remain: {remaining}");
+    }
+
+    #[test]
     fn retention_no_policy_is_noop() {
         let tmp = tempfile::tempdir().unwrap();
         let mut sink = NdjsonSink::create(tmp.path(), "events", 60).unwrap();

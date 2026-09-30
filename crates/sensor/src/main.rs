@@ -330,11 +330,24 @@ fn run() -> Result<()> {
                 {
                     break;
                 }
-                // Fast replay can lap the deadline without a timeout; emit
-                // wall-clock status lines so long pcaps still report.
+                // Fast replay can lap the deadline without a timeout;
+                // run the full housekeeping (status, expiry, live scan,
+                // retention, self-watch) on wall-clock time so sustained
+                // traffic never starves it.
                 if Instant::now() >= deadline {
-                    print_status(&mut counter);
                     deadline = Instant::now() + tick;
+                    housekeeping(
+                        &mut counter,
+                        &mut pipeline,
+                        &mut live,
+                        &mut sink,
+                        &mut inventory,
+                        &inventory_path,
+                        &notify,
+                        blind_secs,
+                        &mut last_frame,
+                        &mut last_blind_alert,
+                    )?;
                 }
             }
             Ok(Err(e)) => {
@@ -342,66 +355,19 @@ fn run() -> Result<()> {
                 continue;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                print_status(&mut counter);
                 deadline = Instant::now() + tick;
-                let now = SystemTime::now();
-                ingest(
+                housekeeping(
+                    &mut counter,
+                    &mut pipeline,
                     &mut live,
                     &mut sink,
                     &mut inventory,
+                    &inventory_path,
                     &notify,
-                    pipeline.expire(now),
+                    blind_secs,
+                    &mut last_frame,
+                    &mut last_blind_alert,
                 )?;
-                ingest(
-                    &mut live,
-                    &mut sink,
-                    &mut inventory,
-                    &notify,
-                    vec![pipeline.heartbeat(now)],
-                )?;
-                if let Some(sink) = &mut sink {
-                    match sink.enforce_retention(now) {
-                        Ok(0) => {}
-                        Ok(n) => tracing::info!(deleted = n, "retention swept event files"),
-                        Err(e) => tracing::warn!(error = %e, "retention sweep failed"),
-                    }
-                }
-                emit_alerts(&mut live, &mut sink, &notify, now)?;
-                if let Some(path) = &inventory_path
-                    && let Err(e) = inventory.save(path)
-                {
-                    tracing::warn!(error = %e, "inventory save failed");
-                }
-                // Self-watch: a live sensor that sees zero frames for
-                // blind_secs is probably unplugged or mis-mirrored; say so
-                // (pnet exposes no drop counters, so blindness is the
-                // observable failure mode).
-                let blind = last_frame.elapsed();
-                if blind >= Duration::from_secs(blind_secs) {
-                    let due_again =
-                        last_blind_alert.is_none_or(|at| at.elapsed() >= Duration::from_secs(1800));
-                    if due_again {
-                        println!(
-                            "{} ALERT sensor-blind [high] -: zero frames for {}s",
-                            now_iso8601(),
-                            blind.as_secs()
-                        );
-                        let blind_alert = events::AlertEvent {
-                            uid: String::new(),
-                            ts: unix_ts(now),
-                            name: "sensor-blind".to_string(),
-                            severity: events::Severity::High,
-                            src: "sensor".to_string(),
-                            dst: None,
-                            message: format!("zero frames for {}s", blind.as_secs()),
-                            evidence: vec![],
-                        };
-                        for e in notify.publish(&blind_alert) {
-                            tracing::warn!(error = %e, "blind-watch push failed");
-                        }
-                        last_blind_alert = Some(Instant::now());
-                    }
-                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 eof = true;
@@ -428,6 +394,13 @@ fn run() -> Result<()> {
         tracing::warn!(error = %e, "inventory save failed");
     }
     if let Some(sink) = &mut sink {
+        // The drain above can rotate past the cap; one last sweep keeps
+        // the exit state bounded too.
+        match sink.enforce_retention(SystemTime::now()) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(deleted = n, "retention swept event files"),
+            Err(e) => tracing::warn!(error = %e, "retention sweep failed"),
+        }
         sink.flush().context("failed to flush event sink")?;
         println!(
             "{} events dir={} files={} events={}",
@@ -452,6 +425,74 @@ fn run() -> Result<()> {
 
 /// Feed events to the live detection window and the event sink; either
 /// side may be disabled, in which case it is skipped.
+/// Wall-clock housekeeping shared by the idle and busy loop paths:
+/// status line, flow expiry, heartbeat, live scan, inventory save,
+/// retention sweep, and the blind self-watch.
+#[allow(clippy::too_many_arguments)]
+fn housekeeping(
+    counter: &mut LinkCounter,
+    pipeline: &mut EventPipeline,
+    live: &mut Option<LiveEngine>,
+    sink: &mut Option<NdjsonSink>,
+    inventory: &mut Inventory,
+    inventory_path: &Option<PathBuf>,
+    notify: &Dispatch,
+    blind_secs: u64,
+    last_frame: &mut Instant,
+    last_blind_alert: &mut Option<Instant>,
+) -> Result<()> {
+    print_status(counter);
+    let now = SystemTime::now();
+    ingest(live, sink, inventory, notify, pipeline.expire(now))?;
+    ingest(live, sink, inventory, notify, vec![pipeline.heartbeat(now)])?;
+    if let Some(sink) = sink {
+        match sink.enforce_retention(now) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(deleted = n, "retention swept event files"),
+            Err(e) => tracing::warn!(error = %e, "retention sweep failed"),
+        }
+    }
+    emit_alerts(live, sink, notify, now)?;
+    if let Some(path) = inventory_path
+        && let Err(e) = inventory.save(path)
+    {
+        tracing::warn!(error = %e, "inventory save failed");
+    }
+    // Self-watch: a live sensor that sees zero frames for blind_secs is
+    // probably unplugged or mis-mirrored; say so (pnet exposes no drop
+    // counters, so blindness is the observable failure mode).
+    let blind = last_frame.elapsed();
+    if blind >= Duration::from_secs(blind_secs) {
+        let due_again = last_blind_alert.is_none_or(|at| at.elapsed() >= Duration::from_secs(1800));
+        if due_again {
+            println!(
+                "{} ALERT sensor-blind [high] -: zero frames for {}s",
+                now_iso8601(),
+                blind.as_secs()
+            );
+            let blind_alert = events::AlertEvent {
+                uid: String::new(),
+                ts: unix_ts(now),
+                name: "sensor-blind".to_string(),
+                severity: events::Severity::High,
+                src: "sensor".to_string(),
+                dst: None,
+                message: format!("zero frames for {}s", blind.as_secs()),
+                evidence: vec![],
+            };
+            if let Some(sink) = sink {
+                sink.write(&Event::Alert(blind_alert.clone()))
+                    .context("failed to write alert to NDJSON sink")?;
+            }
+            for e in notify.publish(&blind_alert) {
+                tracing::warn!(error = %e, "blind-watch push failed");
+            }
+            *last_blind_alert = Some(Instant::now());
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn ingest(
     live: &mut Option<LiveEngine>,
