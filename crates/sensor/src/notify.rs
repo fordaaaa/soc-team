@@ -114,19 +114,39 @@ mod tests {
 
     #[test]
     fn publish_posts_to_a_local_stub() {
-        // A one-shot HTTP stub: accept one connection, read the request,
-        // answer 200, and assert the JSON body reached us.
+        // A one-shot HTTP stub: accept one connection, read the full
+        // request (headers + Content-Length body — it may span several
+        // TCP segments), answer 200, and assert the JSON body reached us.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             use std::io::{Read, Write};
             let (mut stream, _) = listener.accept().unwrap();
-            let mut buf = vec![0u8; 8192];
-            let n = stream.read(&mut buf).unwrap();
-            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let text = String::from_utf8_lossy(&request).to_string();
+                if let Some(header_end) = text.find("\r\n\r\n") {
+                    let body_start = header_end + 4;
+                    let want = text
+                        .lines()
+                        .find_map(|l| l.strip_prefix("Content-Length: "))
+                        .and_then(|v| v.trim().parse::<usize>().ok());
+                    if let Some(len) = want
+                        && request.len() >= body_start + len
+                    {
+                        break;
+                    }
+                }
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+            }
             let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}";
             stream.write_all(response.as_bytes()).unwrap();
-            request
+            String::from_utf8_lossy(&request).to_string()
         });
         let ntfy = Ntfy::new(&format!("http://{addr}"), "home-soc");
         ntfy.publish(&alert(Severity::High)).unwrap();
