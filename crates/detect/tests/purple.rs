@@ -1,7 +1,7 @@
 //! Purple-team integration tests: synthetic attack frames go through
 //! the real sensor pipeline, and the default detection set must fire.
 
-use detect::{RuleEngine, SniWatchDetector};
+use detect::{LiveEngine, RuleEngine, SniWatchDetector};
 use pnet::datalink::MacAddr;
 use pnet_packet::ethernet::{EtherType, EtherTypes, MutableEthernetPacket};
 use pnet_packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
@@ -230,5 +230,30 @@ fn watched_sni_fires_sni_watchlist() {
     assert!(
         alerts.iter().any(|a| a.name == "sni-watchlist"),
         "expected an sni-watchlist alert, got: {alerts:?}"
+    );
+}
+
+#[test]
+fn live_engine_fires_scan_once_across_ticks() {
+    let mut pipe = pipeline();
+    let attacker = Ipv4Addr::new(192, 0, 2, 66);
+    let target = Ipv4Addr::new(198, 51, 100, 7);
+    for i in 0..15u16 {
+        let frame = syn_frame(attacker, target, 40000 + i, 1000 + i);
+        let _ = pipe.observe(ts(i as u64), frame.len() as u64, &frame);
+    }
+    let mut live = LiveEngine::new(RuleEngine::with_defaults(), 600.0, 300.0);
+    for event in pipe.finish() {
+        live.push(&event);
+    }
+    let first = live.tick(14.0);
+    assert!(
+        first.iter().any(|a| a.name == "port-scan"),
+        "expected a live port-scan alert, got: {first:?}"
+    );
+    // The same window on the next tick must not re-fire.
+    assert!(
+        live.tick(15.0).iter().all(|a| a.name != "port-scan"),
+        "cooldown failed: port-scan re-fired on the next tick"
     );
 }

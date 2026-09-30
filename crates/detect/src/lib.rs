@@ -10,12 +10,14 @@ use sensor::event::{AlertEvent, Event, Severity};
 pub mod arp_spoof;
 pub mod beacon;
 pub mod dns_tunnel;
+pub mod live;
 pub mod scan;
 pub mod sni_watch;
 
 pub use arp_spoof::ArpSpoofDetector;
 pub use beacon::BeaconDetector;
 pub use dns_tunnel::DnsTunnelDetector;
+pub use live::LiveEngine;
 pub use scan::PortScanDetector;
 pub use sni_watch::SniWatchDetector;
 
