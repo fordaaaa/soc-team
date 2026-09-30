@@ -54,7 +54,12 @@ jobs:
         with:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
+      # ureq's TLS stack (ring) compiles C in its build script, so the
+      # cross-check needs the aarch64 gcc even for `cargo check`.
+      - run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - run: cargo check --target aarch64-unknown-linux-gnu
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       # Guard the default-off contract: store must build without the
       # (C++-vendoring) duckdb feature even if the default flips later.
       - run: cargo check -p store --no-default-features --target aarch64-unknown-linux-gnu
