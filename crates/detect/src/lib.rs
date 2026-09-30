@@ -5,7 +5,7 @@
 //! uid that the engine fills in. A live streaming loop can reuse the
 //! same trait by feeding it sliding event windows.
 
-use sensor::event::{AlertEvent, Event, Severity};
+use events::{AlertEvent, Event, Severity};
 
 pub mod arp_spoof;
 pub mod beacon;

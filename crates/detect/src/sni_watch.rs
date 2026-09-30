@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use sensor::event::{AlertEvent, Event, Severity};
+use events::{AlertEvent, Event, Severity};
 
 use crate::Detection;
 
@@ -100,7 +100,7 @@ impl Detection for SniWatchDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sensor::event::SslEvent;
+    use events::SslEvent;
 
     fn ssl(uid: &str, ts: f64, src: &str, sni: Option<&str>) -> Event {
         Event::Ssl(SslEvent {

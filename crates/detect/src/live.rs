@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use sensor::event::{AlertEvent, Event};
+use events::{AlertEvent, Event};
 
 use crate::RuleEngine;
 
@@ -98,7 +98,7 @@ fn event_ts(event: &Event) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sensor::event::{ConnEvent, Severity};
+    use events::{ConnEvent, Severity};
 
     fn conn(uid: &str, ts: f64, src: &str, dst: &str, dst_port: u16) -> Event {
         Event::Conn(ConnEvent {
@@ -120,7 +120,7 @@ mod tests {
     }
 
     fn heartbeat(ts: f64) -> Event {
-        Event::Heartbeat(sensor::event::HeartbeatEvent {
+        Event::Heartbeat(events::HeartbeatEvent {
             ts,
             total_frames: 1,
             bytes: 1,

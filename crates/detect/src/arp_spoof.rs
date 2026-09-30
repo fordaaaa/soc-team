@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use sensor::event::{AlertEvent, ArpEvent, Event, Severity};
+use events::{AlertEvent, ArpEvent, Event, Severity};
 
 use crate::Detection;
 

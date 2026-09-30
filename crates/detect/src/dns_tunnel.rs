@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use sensor::event::{AlertEvent, DnsEvent, Event, Severity};
+use events::{AlertEvent, DnsEvent, Event, Severity};
 
 use crate::Detection;
 

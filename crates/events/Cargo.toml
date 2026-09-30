@@ -1,0 +1,17 @@
+[package]
+name = "events"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Zeek-inspired event model shared by the sensor, detections, store, console, and ctl"
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

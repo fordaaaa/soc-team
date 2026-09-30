@@ -10,8 +10,9 @@
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use detect::LiveEngine;
 use sensor::count::LinkCounter;
-use sensor::event::{Event, EventPipeline, NdjsonSink};
+use sensor::event::{Event, EventPipeline, NdjsonSink, unix_ts};
 use sensor::iface::list_interfaces;
 use sensor::source::{
     DatalinkSource, PacketSource, PcapSource, SimSource, SourceItem, now_iso8601,
@@ -246,6 +247,14 @@ fn run() -> Result<()> {
         }
     });
 
+    let live_window_secs = cfg.and_then(|c| c.detect.live_window_secs).unwrap_or(600.0);
+    let cooldown_secs = cfg.and_then(|c| c.detect.cooldown_secs).unwrap_or(300.0);
+    let mut live = Some(LiveEngine::new(
+        detect::RuleEngine::with_defaults(),
+        live_window_secs,
+        cooldown_secs,
+    ));
+
     let mut counter = LinkCounter::new();
     let mut pipeline = EventPipeline::new(Duration::from_secs(60), Duration::from_secs(3600));
     let retention = sensor::event::RetentionPolicy::new(
@@ -275,7 +284,7 @@ fn run() -> Result<()> {
                 counter.record_frame(&pkt.data);
                 let events =
                     pipeline.observe(pkt.timestamp, u64::from(pkt.original_len), &pkt.data);
-                write_events(&mut sink, events)?;
+                ingest(&mut live, &mut sink, events)?;
                 if let Some(max) = args.max_packets
                     && counter.snapshot().total_frames >= max
                 {
@@ -296,8 +305,8 @@ fn run() -> Result<()> {
                 print_status(&mut counter);
                 deadline = Instant::now() + tick;
                 let now = SystemTime::now();
-                write_events(&mut sink, pipeline.expire(now))?;
-                write_events(&mut sink, vec![pipeline.heartbeat(now)])?;
+                ingest(&mut live, &mut sink, pipeline.expire(now))?;
+                ingest(&mut live, &mut sink, vec![pipeline.heartbeat(now)])?;
                 if let Some(sink) = &mut sink {
                     match sink.enforce_retention(now) {
                         Ok(0) => {}
@@ -305,6 +314,7 @@ fn run() -> Result<()> {
                         Err(e) => tracing::warn!(error = %e, "retention sweep failed"),
                     }
                 }
+                emit_alerts(&mut live, &mut sink, now)?;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 eof = true;
@@ -316,7 +326,7 @@ fn run() -> Result<()> {
     print_summary(&counter);
     // Drain remaining flows and flush before any non-EOF exit: the sink's
     // BufWriter would not run its Drop on `process::exit` below.
-    write_events(&mut sink, pipeline.finish())?;
+    ingest(&mut live, &mut sink, pipeline.finish())?;
     if let Some(sink) = &mut sink {
         sink.flush().context("failed to flush event sink")?;
         println!(
@@ -340,12 +350,48 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-/// Append events to the sink when one is configured; a no-op otherwise.
-fn write_events(sink: &mut Option<NdjsonSink>, events: Vec<Event>) -> Result<()> {
-    if let Some(sink) = sink {
-        for event in &events {
+/// Feed events to the live detection window and the event sink; either
+/// side may be disabled, in which case it is skipped.
+fn ingest(
+    live: &mut Option<LiveEngine>,
+    sink: &mut Option<NdjsonSink>,
+    events: Vec<Event>,
+) -> Result<()> {
+    for event in &events {
+        if let Some(live) = live {
+            live.push(event);
+        }
+        if let Some(sink) = sink {
             sink.write(event)
                 .context("failed to write event to NDJSON sink")?;
+        }
+    }
+    Ok(())
+}
+
+/// Run the live engine and emit any alerts that fired: one stdout line
+/// each (always) plus an Alert event in the sink when configured.
+fn emit_alerts(
+    live: &mut Option<LiveEngine>,
+    sink: &mut Option<NdjsonSink>,
+    now: SystemTime,
+) -> Result<()> {
+    let Some(live) = live else {
+        return Ok(());
+    };
+    for alert in live.tick(unix_ts(now)) {
+        println!(
+            "{} ALERT {} [{}] {} -> {}: {}",
+            now_iso8601(),
+            alert.name,
+            format!("{:?}", alert.severity).to_lowercase(),
+            alert.src,
+            alert.dst.as_deref().unwrap_or("-"),
+            alert.message
+        );
+        if let Some(sink) = sink {
+            sink.write(&Event::Alert(alert.clone()))
+                .context("failed to write alert to NDJSON sink")?;
         }
     }
     Ok(())

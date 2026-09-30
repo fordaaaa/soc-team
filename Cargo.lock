@@ -764,6 +764,7 @@ dependencies = [
 name = "detect"
 version = "0.1.0"
 dependencies = [
+ "events",
  "hickory-proto",
  "pnet",
  "pnet_packet",
@@ -852,6 +853,15 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "events"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -2067,6 +2077,8 @@ dependencies = [
  "clap",
  "criterion",
  "ctrlc",
+ "detect",
+ "events",
  "hickory-proto",
  "httparse",
  "pcap-file",

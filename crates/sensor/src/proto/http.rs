@@ -20,13 +20,7 @@ const HOST_CAP: usize = 255;
 /// Maximum length of a summarized User-Agent header value, in chars.
 const USER_AGENT_CAP: usize = 128;
 
-/// Parsed HTTP header block, request or response. All strings capped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HttpKind {
-    Request,
-    Response,
-}
+pub use events::HttpKind;
 
 /// Summary of one HTTP header block.
 #[derive(Debug, Clone, PartialEq, Eq)]

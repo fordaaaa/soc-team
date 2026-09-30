@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
-use sensor::event::{AlertEvent, ConnEvent, Event, Severity};
+use events::{AlertEvent, ConnEvent, Event, Severity};
 
 use crate::Detection;
 
