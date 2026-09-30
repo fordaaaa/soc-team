@@ -1,0 +1,29 @@
+# socteam sensor config example — copy to /etc/socteam/socteam.toml and edit.
+# Every value is optional; command-line flags override the file.
+
+[sensor]
+# Capture source — set exactly one of these.
+# iface = "eth0"          # live capture (needs CAP_NET_RAW, not root)
+# pcap = "/tmp/cap.pcap"  # offline replay
+# sim = true              # synthetic traffic, no root needed
+# pps = 240               # sim packets per second
+# seed = 42               # sim seed
+
+events = "/var/lib/socteam/events"   # NDJSON event output directory
+interval = 5                          # seconds between status lines
+rotate_bytes = 33554432               # rotate event files at 32 MiB
+
+[retention]
+# Keep the events directory bounded (SD-card-friendly).
+max_dir_bytes = 536870912             # 512 MiB total; oldest files deleted first
+max_age_secs = 604800                 # one week
+
+[alert]
+# ntfy push: alerts POST to <ntfy_url>/<ntfy_topic>. Leave unset to disable.
+# ntfy_url = "https://ntfy.sh"
+# ntfy_topic = "your-private-topic-name"
+blind_secs = 900                      # alert after 15 min of zero traffic
+
+[detect]
+live_window_secs = 600.0              # event history the live engine scans
+cooldown_secs = 300.0                 # min seconds between repeat alerts

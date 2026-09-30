@@ -29,6 +29,11 @@ use std::time::{Duration, Instant, SystemTime};
     about = "socteam local-network sensor"
 )]
 struct Args {
+    /// TOML config file; every setting can also be given as a flag, and
+    /// flags override the file.
+    #[arg(long)]
+    config: Option<PathBuf>,
+
     /// Interface to capture on (e.g. en0, eth0).
     #[arg(long)]
     iface: Option<String>,
@@ -43,20 +48,20 @@ struct Args {
     sim: bool,
 
     /// Seed for --sim synthetic traffic.
-    #[arg(long, default_value_t = 42)]
-    seed: u64,
+    #[arg(long)]
+    seed: Option<u64>,
 
     /// Target packets per second for --sim synthetic traffic (0 = flat out).
-    #[arg(long, default_value_t = 240)]
-    pps: u32,
+    #[arg(long)]
+    pps: Option<u32>,
 
     /// List available interfaces and exit.
     #[arg(long)]
     list_ifaces: bool,
 
     /// Seconds between status lines.
-    #[arg(long, default_value_t = 2)]
-    interval: u64,
+    #[arg(long)]
+    interval: Option<u64>,
 
     /// Stop after N packets (for testing).
     #[arg(long)]
@@ -74,8 +79,8 @@ struct Args {
 
     /// Rotate the NDJSON event file when it exceeds this many bytes
     /// (SD-card-friendly default).
-    #[arg(long, default_value_t = 16 * 1024 * 1024)]
-    rotate_bytes: u64,
+    #[arg(long)]
+    rotate_bytes: Option<u64>,
 }
 
 fn print_interfaces() {
@@ -127,8 +132,59 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    if args.interval == 0 {
+    // Optional config file; every value is optional and flags win.
+    let config = match &args.config {
+        Some(path) => {
+            Some(sensor::config::SensorConfig::load(path).map_err(|e| anyhow::anyhow!("{e}"))?)
+        }
+        None => None,
+    };
+    let cfg = config.as_ref();
+    let sim = args.sim || cfg.and_then(|c| c.sensor.sim).unwrap_or(false);
+    let iface = args
+        .iface
+        .clone()
+        .or_else(|| cfg.and_then(|c| c.sensor.iface.clone()));
+    let pcap: Option<PathBuf> = args
+        .pcap
+        .clone()
+        .or_else(|| cfg.and_then(|c| c.sensor.pcap.clone()).map(PathBuf::from));
+    let promiscuous = args.promiscuous || cfg.and_then(|c| c.sensor.promiscuous).unwrap_or(false);
+    let seed = args.seed.or(cfg.and_then(|c| c.sensor.seed)).unwrap_or(42);
+    let pps = args.pps.or(cfg.and_then(|c| c.sensor.pps)).unwrap_or(240);
+    let interval = args
+        .interval
+        .or(cfg.and_then(|c| c.sensor.interval))
+        .unwrap_or(2);
+    let rotate_bytes = args
+        .rotate_bytes
+        .or(cfg.and_then(|c| c.sensor.rotate_bytes))
+        .unwrap_or(16 * 1024 * 1024);
+    let events = args
+        .events
+        .clone()
+        .or_else(|| cfg.and_then(|c| c.sensor.events.clone()).map(PathBuf::from));
+
+    if interval == 0 {
         bail!("--interval must be >= 1");
+    }
+
+    let mut source_count = 0;
+    if sim {
+        source_count += 1;
+    }
+    if pcap.is_some() {
+        source_count += 1;
+    }
+    if iface.is_some() {
+        source_count += 1;
+    }
+    if source_count > 1 {
+        // CLI + config may both name a source; pick in the documented
+        // precedence order rather than failing.
+        tracing::warn!(
+            "multiple capture sources set (config + flags); precedence: sim, then pcap, then iface"
+        );
     }
 
     tracing_subscriber::fmt()
@@ -147,14 +203,14 @@ fn run() -> Result<()> {
     .context("failed to install Ctrl-C handler")?;
 
     // Build the packet source: sim generation, pcap replay, or live capture.
-    let source: Box<dyn PacketSource<Item = SourceItem> + Send> = if args.sim {
-        if args.promiscuous {
+    let source: Box<dyn PacketSource<Item = SourceItem> + Send> = if sim {
+        if promiscuous {
             tracing::info!("--promiscuous has no effect in --sim mode");
         }
-        tracing::info!(seed = args.seed, pps = args.pps, "simulating traffic");
-        Box::new(SimSource::new(args.seed, args.pps))
-    } else if let Some(path) = &args.pcap {
-        if args.promiscuous {
+        tracing::info!(seed, pps, "simulating traffic");
+        Box::new(SimSource::new(seed, pps))
+    } else if let Some(path) = &pcap {
+        if promiscuous {
             tracing::info!("--promiscuous has no effect in --pcap mode");
         }
         tracing::info!(pcap = %path.display(), "replaying pcap");
@@ -163,7 +219,7 @@ fn run() -> Result<()> {
                 .with_context(|| format!("failed to open pcap '{}'", path.display()))?,
         )
     } else {
-        let Some(iface_name) = args.iface.clone() else {
+        let Some(iface_name) = iface.clone() else {
             print_interfaces();
             println!(
                 "hint: pass --iface <NAME> to capture, --sim for synthetic traffic, or --list-ifaces to list"
@@ -171,7 +227,7 @@ fn run() -> Result<()> {
             return Ok(());
         };
         tracing::info!(iface = %iface_name, "capturing");
-        Box::new(DatalinkSource::open(&iface_name, args.promiscuous)?)
+        Box::new(DatalinkSource::open(&iface_name, promiscuous)?)
     };
 
     // Reader thread owns the source and pushes (bytes, timestamp, wire len)
@@ -192,15 +248,15 @@ fn run() -> Result<()> {
 
     let mut counter = LinkCounter::new();
     let mut pipeline = EventPipeline::new(Duration::from_secs(60), Duration::from_secs(3600));
-    let mut sink = match &args.events {
+    let mut sink = match &events {
         Some(dir) => Some(
-            NdjsonSink::create(dir, "events", args.rotate_bytes)
+            NdjsonSink::create(dir, "events", rotate_bytes)
                 .with_context(|| format!("failed to create event sink in '{}'", dir.display()))?,
         ),
         None => None,
     };
-    let interval = Duration::from_secs(args.interval);
-    let mut deadline = Instant::now() + interval;
+    let tick = Duration::from_secs(interval);
+    let mut deadline = Instant::now() + tick;
     let mut eof = false;
 
     loop {
@@ -225,7 +281,7 @@ fn run() -> Result<()> {
                 // wall-clock status lines so long pcaps still report.
                 if Instant::now() >= deadline {
                     print_status(&mut counter);
-                    deadline = Instant::now() + interval;
+                    deadline = Instant::now() + tick;
                 }
             }
             Ok(Err(e)) => {
@@ -234,7 +290,7 @@ fn run() -> Result<()> {
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 print_status(&mut counter);
-                deadline = Instant::now() + interval;
+                deadline = Instant::now() + tick;
                 let now = SystemTime::now();
                 write_events(&mut sink, pipeline.expire(now))?;
                 write_events(&mut sink, vec![pipeline.heartbeat(now)])?;
@@ -255,7 +311,7 @@ fn run() -> Result<()> {
         println!(
             "{} events dir={} files={} events={}",
             now_iso8601(),
-            args.events
+            events
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new(""))
                 .display(),

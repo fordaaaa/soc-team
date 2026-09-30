@@ -6,6 +6,7 @@
 //! Phase 1 replaces the datalink backend on Linux with AF_PACKET rings +
 //! eBPF filtering for zero-copy/low latency.
 
+pub mod config;
 pub mod count;
 pub mod event;
 pub mod flow;
