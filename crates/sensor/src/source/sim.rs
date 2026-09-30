@@ -11,7 +11,9 @@ use pnet_packet::ethernet::{EtherType, EtherTypes, MutableEthernetPacket};
 use pnet_packet::ip::IpNextHeaderProtocols;
 use pnet_packet::ipv4::{Ipv4Flags, MutableIpv4Packet};
 use pnet_packet::ipv6::MutableIpv6Packet;
+use pnet_packet::tcp::MutableTcpPacket;
 use pnet_packet::udp::MutableUdpPacket;
+use std::collections::VecDeque;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, SystemTime};
 
@@ -19,6 +21,13 @@ use std::time::{Duration, SystemTime};
 const LCG_MULT: u64 = 6364136223846793005;
 /// LCG increment from Knuth MMIX (`1442695040888963407`).
 const LCG_ADD: u64 = 1442695040888963407;
+/// A 15-SYN port-scan drill starts every this-many packets.
+const SCAN_DRILL_EVERY: u64 = 500;
+/// A dueling-MAC ARP drill starts every this-many packets.
+const ARP_DRILL_EVERY: u64 = 1500;
+/// Fixed scan-drill endpoints (RFC 5737 doc ranges).
+const DRILL_ATTACKER: [u8; 4] = [192, 0, 2, 66];
+const DRILL_TARGET: [u8; 4] = [198, 51, 100, 7];
 
 /// Deterministic synthetic [`PacketSource`] for demos and tests.
 ///
@@ -34,6 +43,10 @@ pub struct SimSource {
     state: u64,
     /// Target packets per second; `0` disables pacing (no sleeping).
     pps: u32,
+    /// Total packets yielded (drills schedule off this counter).
+    count: u64,
+    /// Queued drill frames; emitted before any new frame is drawn.
+    pending: VecDeque<Vec<u8>>,
 }
 
 impl SimSource {
@@ -43,7 +56,12 @@ impl SimSource {
     /// call sleeps `1/pps` (jittered ±20%) before yielding. `pps == 0`
     /// disables pacing entirely (tests should use `0`).
     pub fn new(seed: u64, pps: u32) -> Self {
-        Self { state: seed, pps }
+        Self {
+            state: seed,
+            pps,
+            count: 0,
+            pending: VecDeque::new(),
+        }
     }
 
     /// Advance the LCG and return the new state.
@@ -110,6 +128,19 @@ impl SimSource {
         if let Some(mut eth) = MutableEthernetPacket::new(&mut frame) {
             eth.set_destination(self.random_mac());
             eth.set_source(self.random_mac());
+            eth.set_ethertype(ethertype);
+            eth.set_payload(inner);
+        }
+        frame
+    }
+
+    /// Ethernet header without LCG draws: fixed MACs so drill frames
+    /// never perturb the random stream.
+    fn ethernet_frame_fixed(&self, ethertype: EtherType, inner: &[u8]) -> Vec<u8> {
+        let mut frame = vec![0u8; 14 + inner.len()];
+        if let Some(mut eth) = MutableEthernetPacket::new(&mut frame) {
+            eth.set_destination(MacAddr::new(0x02, 0, 0, 0, 0, 0x01));
+            eth.set_source(MacAddr::new(0x02, 0, 0, 0, 0, 0x02));
             eth.set_ethertype(ethertype);
             eth.set_payload(inner);
         }
@@ -207,6 +238,81 @@ impl SimSource {
         self.ethernet_frame(EtherType::new(0x88CC), &payload)
     }
 
+    /// One TCP SYN drill frame: fixed attacker/target, distinct port.
+    /// Values are fixed (no LCG draws) so drills keep the stream
+    /// deterministic.
+    fn drill_syn(&self, src_port: u16, dst_port: u16) -> Vec<u8> {
+        let mut tcp_buf = vec![0u8; 20];
+        if let Some(mut tcp) = MutableTcpPacket::new(&mut tcp_buf) {
+            tcp.set_source(src_port);
+            tcp.set_destination(dst_port);
+            tcp.set_data_offset(5);
+            tcp.set_flags(0x02); // SYN
+            tcp.set_window(64240);
+        }
+        let mut ip_buf = vec![0u8; 20 + tcp_buf.len()];
+        let ip_len = ip_buf.len() as u16;
+        if let Some(mut ip) = MutableIpv4Packet::new(&mut ip_buf) {
+            ip.set_version(4);
+            ip.set_header_length(5);
+            ip.set_total_length(ip_len);
+            ip.set_ttl(64);
+            ip.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
+            ip.set_source(Ipv4Addr::from(DRILL_ATTACKER));
+            ip.set_destination(Ipv4Addr::from(DRILL_TARGET));
+            ip.set_payload(&tcp_buf);
+        }
+        pad_frame(self.ethernet_frame_fixed(EtherTypes::Ipv4, &ip_buf))
+    }
+
+    /// One ARP drill frame: `sender_ip` claimed by `sender_mac`.
+    fn drill_arp(&self, sender_ip: [u8; 4], sender_mac: [u8; 6], op: u16) -> Vec<u8> {
+        let mut arp_buf = vec![0u8; 28];
+        if let Some(mut arp) = MutableArpPacket::new(&mut arp_buf) {
+            arp.set_hardware_type(ArpHardwareTypes::Ethernet);
+            arp.set_protocol_type(EtherTypes::Ipv4);
+            arp.set_hw_addr_len(6);
+            arp.set_proto_addr_len(4);
+            arp.set_operation(if op == 2 {
+                ArpOperations::Reply
+            } else {
+                ArpOperations::Request
+            });
+            arp.set_sender_hw_addr(MacAddr::new(
+                sender_mac[0],
+                sender_mac[1],
+                sender_mac[2],
+                sender_mac[3],
+                sender_mac[4],
+                sender_mac[5],
+            ));
+            arp.set_sender_proto_addr(Ipv4Addr::from(sender_ip));
+            arp.set_target_hw_addr(MacAddr::new(0, 0, 0, 0, 0, 0));
+            arp.set_target_proto_addr(Ipv4Addr::from(sender_ip));
+        }
+        pad_frame(self.ethernet_frame_fixed(EtherTypes::Arp, &arp_buf))
+    }
+
+    /// Queue the frames of the drill scheduled at `count`, if any.
+    fn schedule_drill(&mut self) {
+        if self.count.is_multiple_of(SCAN_DRILL_EVERY) {
+            for i in 0..15u16 {
+                self.pending.push_back(self.drill_syn(40000 + i, 1000 + i));
+            }
+        }
+        if self.count.is_multiple_of(ARP_DRILL_EVERY) {
+            for i in 0..4 {
+                let mac = if i % 2 == 0 {
+                    [0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0x01]
+                } else {
+                    [0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0x02]
+                };
+                self.pending
+                    .push_back(self.drill_arp([10, 0, 0, 5], mac, 2));
+            }
+        }
+    }
+
     /// Next frame: ~85% IPv4, ~8% IPv6, ~5% ARP, ~2% other; padded so the
     /// total length lands in 60–400 bytes.
     fn next_frame(&mut self) -> Vec<u8> {
@@ -246,12 +352,33 @@ impl SimSource {
     }
 }
 
+/// Stretch a frame to the 60-byte Ethernet minimum with zero padding.
+fn pad_frame(mut frame: Vec<u8>) -> Vec<u8> {
+    if frame.len() < 60 {
+        frame.resize(60, 0);
+    }
+    frame
+}
+
 impl PacketSource for SimSource {
     type Item = SourceItem;
 
     /// Yield the next synthetic packet; never returns `None` (live-like).
+    /// Every [`SCAN_DRILL_EVERY`] packets a port-scan drill plays and every
+    /// [`ARP_DRILL_EVERY`] an ARP-conflict drill, so a sim run exercises
+    /// the live detection path end to end.
     fn next_packet(&mut self) -> Option<Self::Item> {
         self.pace();
+        if let Some(frame) = self.pending.pop_front() {
+            let len = frame.len() as u32;
+            return Some(Ok(CapturedPacket::new(frame, SystemTime::now(), len)));
+        }
+        self.count += 1;
+        self.schedule_drill();
+        if let Some(frame) = self.pending.pop_front() {
+            let len = frame.len() as u32;
+            return Some(Ok(CapturedPacket::new(frame, SystemTime::now(), len)));
+        }
         let frame = self.next_frame();
         let len = frame.len() as u32;
         Some(Ok(CapturedPacket::new(frame, SystemTime::now(), len)))
@@ -328,6 +455,45 @@ mod tests {
         assert!(
             elapsed < Duration::from_millis(500),
             "1_000 unpaced frames took {elapsed:?}, expected well under a second"
+        );
+    }
+
+    #[test]
+    fn drills_fire_live_detections() {
+        use crate::event::EventPipeline;
+        use detect::{LiveEngine, RuleEngine};
+        use std::time::Duration;
+
+        let mut source = SimSource::new(42, 0);
+        let mut pipeline = EventPipeline::new(Duration::from_secs(60), Duration::from_secs(3600));
+        let mut live = LiveEngine::new(RuleEngine::with_defaults(), 600.0, 300.0);
+
+        for _ in 0..2_000 {
+            let pkt = source
+                .next_packet()
+                .expect("sim never returns None")
+                .expect("sim never fails");
+            for event in pipeline.observe(pkt.timestamp, u64::from(pkt.original_len), &pkt.data) {
+                live.push(&event);
+            }
+        }
+        for event in pipeline.finish() {
+            live.push(&event);
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+            + 1.0;
+        let alerts = live.tick(now);
+        let names: Vec<&str> = alerts.iter().map(|a| a.name.as_str()).collect();
+        assert!(
+            names.contains(&"port-scan"),
+            "expected a port-scan drill alert, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"arp-spoof"),
+            "expected an arp-spoof drill alert, got: {names:?}"
         );
     }
 
