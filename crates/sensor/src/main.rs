@@ -14,6 +14,7 @@ use detect::LiveEngine;
 use sensor::count::LinkCounter;
 use sensor::event::{Event, EventPipeline, NdjsonSink, unix_ts};
 use sensor::iface::list_interfaces;
+use sensor::notify::Ntfy;
 use sensor::source::{
     DatalinkSource, PacketSource, PcapSource, SimSource, SourceItem, now_iso8601,
 };
@@ -255,6 +256,14 @@ fn run() -> Result<()> {
         cooldown_secs,
     ));
 
+    let ntfy = cfg
+        .and_then(|c| c.alert.ntfy_url.as_deref())
+        .and_then(|url| {
+            cfg.and_then(|c| c.alert.ntfy_topic.as_deref())
+                .map(|topic| Ntfy::new(url, topic))
+        });
+    let blind_secs = cfg.and_then(|c| c.alert.blind_secs).unwrap_or(600);
+
     let mut counter = LinkCounter::new();
     let mut pipeline = EventPipeline::new(Duration::from_secs(60), Duration::from_secs(3600));
     let retention = sensor::event::RetentionPolicy::new(
@@ -271,6 +280,8 @@ fn run() -> Result<()> {
     let tick = Duration::from_secs(interval);
     let mut deadline = Instant::now() + tick;
     let mut eof = false;
+    let mut last_frame = Instant::now();
+    let mut last_blind_alert = Option::<Instant>::None;
 
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -281,6 +292,7 @@ fn run() -> Result<()> {
         let timeout = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(timeout) {
             Ok(Ok(pkt)) => {
+                last_frame = Instant::now();
                 counter.record_frame(&pkt.data);
                 let events =
                     pipeline.observe(pkt.timestamp, u64::from(pkt.original_len), &pkt.data);
@@ -314,7 +326,38 @@ fn run() -> Result<()> {
                         Err(e) => tracing::warn!(error = %e, "retention sweep failed"),
                     }
                 }
-                emit_alerts(&mut live, &mut sink, now)?;
+                emit_alerts(&mut live, &mut sink, &ntfy, now)?;
+                // Self-watch: a live sensor that sees zero frames for
+                // blind_secs is probably unplugged or mis-mirrored; say so
+                // (pnet exposes no drop counters, so blindness is the
+                // observable failure mode).
+                let blind = last_frame.elapsed();
+                if blind >= Duration::from_secs(blind_secs) {
+                    let due_again =
+                        last_blind_alert.is_none_or(|at| at.elapsed() >= Duration::from_secs(1800));
+                    if due_again {
+                        println!(
+                            "{} ALERT sensor-blind [high] -: zero frames for {}s",
+                            now_iso8601(),
+                            blind.as_secs()
+                        );
+                        if let Some(ntfy) = &ntfy
+                            && let Err(e) = ntfy.publish(&events::AlertEvent {
+                                uid: String::new(),
+                                ts: unix_ts(now),
+                                name: "sensor-blind".to_string(),
+                                severity: events::Severity::High,
+                                src: "sensor".to_string(),
+                                dst: None,
+                                message: format!("zero frames for {}s", blind.as_secs()),
+                                evidence: vec![],
+                            })
+                        {
+                            tracing::warn!(error = %e, "blind-watch push failed");
+                        }
+                        last_blind_alert = Some(Instant::now());
+                    }
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 eof = true;
@@ -327,6 +370,8 @@ fn run() -> Result<()> {
     // Drain remaining flows and flush before any non-EOF exit: the sink's
     // BufWriter would not run its Drop on `process::exit` below.
     ingest(&mut live, &mut sink, pipeline.finish())?;
+    // Final scan: alerts still pending in the live window fire before exit.
+    emit_alerts(&mut live, &mut sink, &ntfy, SystemTime::now())?;
     if let Some(sink) = &mut sink {
         sink.flush().context("failed to flush event sink")?;
         println!(
@@ -374,6 +419,7 @@ fn ingest(
 fn emit_alerts(
     live: &mut Option<LiveEngine>,
     sink: &mut Option<NdjsonSink>,
+    ntfy: &Option<Ntfy>,
     now: SystemTime,
 ) -> Result<()> {
     let Some(live) = live else {
@@ -392,6 +438,12 @@ fn emit_alerts(
         if let Some(sink) = sink {
             sink.write(&Event::Alert(alert.clone()))
                 .context("failed to write alert to NDJSON sink")?;
+        }
+        // Best-effort push: never let delivery break capture.
+        if let Some(ntfy) = ntfy
+            && let Err(e) = ntfy.publish(&alert)
+        {
+            tracing::warn!(error = %e, name = %alert.name, "ntfy push failed");
         }
     }
     Ok(())
