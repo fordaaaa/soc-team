@@ -128,6 +128,7 @@ the other end; the same policy will apply to every future detection.
 ## Docs
 
 - [PLAN.md](PLAN.md) — vision, phased roadmap, hardware path, risks
+- [DEPLOY.md](docs/DEPLOY.md) — homelab appliance guide (hardware choice, mirror port, systemd, ntfy)
 - [DETECTIONS.md](DETECTIONS.md) — detection coverage and guarantees
 - [docs/field-manual.html](docs/field-manual.html) — engineering decisions,
   diagrams, glossary
