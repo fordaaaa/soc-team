@@ -1,8 +1,9 @@
 //! `socteam-sensor` — packet counter + Zeek-style event emitter.
 //!
-//! Opens an interface via `pnet::datalink` or replays a pcap file, prints
-//! per-interval frame counters to stdout, and (with `--events <DIR>`)
-//! writes conn/dns/ssl/http/heartbeat events as rotating NDJSON.
+//! Captures an interface via `pnet::datalink`, replays a pcap file, or
+//! generates deterministic synthetic traffic (`--sim`, no root needed);
+//! prints per-interval frame counters to stdout and (with `--events <DIR>`)
+//! writes conn/dns/ssl/http/arp/heartbeat events as rotating NDJSON.
 //!
 //! Phase 1 replaces the datalink backend on Linux with AF_PACKET rings +
 //! eBPF filtering for zero-copy/low latency.
@@ -12,7 +13,9 @@ use clap::Parser;
 use sensor::count::LinkCounter;
 use sensor::event::{Event, EventPipeline, NdjsonSink};
 use sensor::iface::list_interfaces;
-use sensor::source::{DatalinkSource, PacketSource, PcapSource, SourceItem, now_iso8601};
+use sensor::source::{
+    DatalinkSource, PacketSource, PcapSource, SimSource, SourceItem, now_iso8601,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +36,19 @@ struct Args {
     /// Replay packets from a pcap file instead of live capture.
     #[arg(long, conflicts_with = "iface")]
     pcap: Option<PathBuf>,
+
+    /// Generate deterministic synthetic traffic instead of capturing
+    /// (no root needed; exercises the full pipeline for demos/tests).
+    #[arg(long, conflicts_with_all = ["iface", "pcap"])]
+    sim: bool,
+
+    /// Seed for --sim synthetic traffic.
+    #[arg(long, default_value_t = 42)]
+    seed: u64,
+
+    /// Target packets per second for --sim synthetic traffic (0 = flat out).
+    #[arg(long, default_value_t = 240)]
+    pps: u32,
 
     /// List available interfaces and exit.
     #[arg(long)]
@@ -130,8 +146,14 @@ fn run() -> Result<()> {
     })
     .context("failed to install Ctrl-C handler")?;
 
-    // Build the packet source: pcap replay or live capture.
-    let source: Box<dyn PacketSource<Item = SourceItem> + Send> = if let Some(path) = &args.pcap {
+    // Build the packet source: sim generation, pcap replay, or live capture.
+    let source: Box<dyn PacketSource<Item = SourceItem> + Send> = if args.sim {
+        if args.promiscuous {
+            tracing::info!("--promiscuous has no effect in --sim mode");
+        }
+        tracing::info!(seed = args.seed, pps = args.pps, "simulating traffic");
+        Box::new(SimSource::new(args.seed, args.pps))
+    } else if let Some(path) = &args.pcap {
         if args.promiscuous {
             tracing::info!("--promiscuous has no effect in --pcap mode");
         }
@@ -143,7 +165,9 @@ fn run() -> Result<()> {
     } else {
         let Some(iface_name) = args.iface.clone() else {
             print_interfaces();
-            println!("hint: pass --iface <NAME> to capture, or --list-ifaces to list");
+            println!(
+                "hint: pass --iface <NAME> to capture, --sim for synthetic traffic, or --list-ifaces to list"
+            );
             return Ok(());
         };
         tracing::info!(iface = %iface_name, "capturing");
