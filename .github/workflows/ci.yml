@@ -28,17 +28,25 @@ jobs:
 
   release-arm64:
     # Native aarch64 build (the Raspberry Pi target) packaged as a tarball.
+    # Statically linked against musl so the binaries run on any Linux
+    # (Raspberry Pi OS Bookworm ships glibc 2.36; a gnu-linked binary from
+    # ubuntu-24.04 needs 2.39 and dies with `GLIBC_2.39 not found`).
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p sensor -p ctl -p console
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release -p sensor -p ctl -p console --target aarch64-unknown-linux-musl
       - name: package
         run: |
           VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
           mkdir -p dist
-          cp target/release/socteam-sensor target/release/socteam target/release/socteam-console dist/
+          cp target/aarch64-unknown-linux-musl/release/socteam-sensor dist/
+          cp target/aarch64-unknown-linux-musl/release/socteam dist/
+          cp target/aarch64-unknown-linux-musl/release/socteam-console dist/
           cp deploy/socteam.toml.example dist/
           tar -czf "socteam-arm64-${VERSION}.tar.gz" -C dist .
       - uses: actions/upload-artifact@v4
