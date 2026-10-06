@@ -7,3 +7,6 @@ PLAN.md
 # build output
 /target
 .zcode/
+
+# brig code-graph index artifact (local only)
+/index/

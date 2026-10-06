@@ -93,10 +93,51 @@ sudo systemctl start socteam-sensor socteam-console
 journalctl -u socteam-sensor -f        # watch for ALERT lines
 ```
 
-The console is on `http://<pi>:8080` — note it has **no authentication**;
-the systemd unit keeps the bind loopback-only, so reach it over SSH port
-forwarding (`ssh -L 8080:localhost:8080 pi`) or put it behind your own
-auth before exposing it.
+The console is on `http://<pi>:8080` — it supports `--token` bearer auth
+(see 3b); the systemd unit keeps the bind loopback-only by default, so
+reach it over SSH port forwarding (`ssh -L 8080:localhost:8080 pi`),
+Tailscale serve, or set a token before exposing it to the LAN.
+
+### 3b. Expose the console (LAN vs Tailscale)
+
+The console now supports `--token <value>`; when set, all routes except
+`/api/health` require `Authorization: Bearer <value>`. Without a token,
+keep the bind loopback-only.
+
+**LAN-only.** Start the console with a token and a LAN bind:
+
+```sh
+socteam-console --events /var/lib/socteam/events --no-open \
+  --bind 0.0.0.0:8080 --token $(openssl rand -hex 32)
+```
+
+Reach it at `http://<pi-ip>:8080`, and restrict the firewall to your LAN:
+
+```sh
+sudo ufw allow from 192.168.0.0/16 to any port 8080
+```
+
+Warning: anyone on the WiFi can see DNS names, TLS server names, and flow
+metadata when the bind is LAN-wide, so a token-less LAN bind exposes that
+traffic metadata to everyone on the network.
+
+**Tailscale (recommended for remote access).** Keep the loopback bind
+(`--bind 127.0.0.1:8080`), then serve it over your tailnet:
+
+```sh
+sudo tailscale up
+sudo tailscale serve --bg http://127.0.0.1:8080
+```
+
+Access it at `https://<pi>.tail*.ts.net/`. `tailscale serve` is
+tailnet-private; `tailscale funnel` is public — never use funnel for the
+console. No router port-forward is needed.
+
+Auth header example:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" http://<pi>:8080/api/stats
+```
 
 ## 4. Alerts on your phone
 
@@ -153,7 +194,9 @@ so you should see `ALERT` lines and get pushes within seconds.
   watch catches total capture death, not partial loss.
 - **No inline blocking.** socteam watches; it never drops or shapes
   traffic. Enforcement is a far-future phase behind a hardware watchdog.
-- **Console has no auth.** Keep it loopback-bound.
+- **Console auth is a shared bearer token.** `--token` gates everything except
+  `/api/health`; there is no user model, TLS, or rate-limiting — keep it
+  behind loopback/Tailscale or LAN+firewall, never public.
 - **Detect-to-alert latency** is bounded by the status interval (default
   2 s) plus flow expiry for connection-based detections — fine for a
   home SOC, not a sub-second IPS.

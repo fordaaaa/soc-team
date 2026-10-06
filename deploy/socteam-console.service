@@ -5,7 +5,15 @@ Wants=socteam-sensor.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/socteam-console --events /var/lib/socteam/events --no-open
+# Default bind is loopback-only. This is deliberate: without a token the
+# console has no auth, so LAN exposure must always add --token <long-random>.
+# LAN example: replace the bind with 0.0.0.0:8080 AND add --token <long-random>
+# (generate with `openssl rand -hex 32`).
+# Tailscale example (preferred for remote access): keep the loopback bind and run
+# `tailscale serve --bg http://127.0.0.1:8080`.
+# Never use `tailscale funnel` (public) — use `serve` (tailnet-private);
+# never port-forward the console on your router.
+ExecStart=/usr/local/bin/socteam-console --events /var/lib/socteam/events --no-open --bind 127.0.0.1:8080
 Restart=on-failure
 RestartSec=5
 

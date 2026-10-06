@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use console::{SnapshotCollector, router};
+use console::{SnapshotCollector, is_loopback_bind, router};
 use sensor::source::{DatalinkSource, PacketSource, PcapSource, SimSource, SourceItem};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -28,8 +28,8 @@ struct Cli {
 
     /// Address to bind the HTTP server to.
     ///
-    /// SECURITY: loopback-only default is deliberate — no auth yet;
-    /// do not expose without an auth story.
+    /// SECURITY: loopback-only default is deliberate — pass --token with
+    /// any non-loopback bind; /api/health stays open as a liveness probe.
     #[arg(long, default_value = "127.0.0.1:8080")]
     bind: String,
 
@@ -64,6 +64,10 @@ struct Cli {
     /// Alert NDJSON file written by `socteam detect`.
     #[arg(long)]
     alerts_file: Option<PathBuf>,
+
+    /// Bearer token required for all routes except /api/health. Pass a long random value when binding off loopback.
+    #[arg(long)]
+    token: Option<String>,
 }
 
 /// Best-effort open of `url` in the default browser.
@@ -145,10 +149,18 @@ async fn run() -> Result<()> {
         });
     }
 
+    if args.token.is_none() && !is_loopback_bind(&args.bind) {
+        tracing::warn!(
+            "binding '{}' without --token exposes flows unauthenticated; set a token",
+            args.bind
+        );
+    }
+
     let state = std::sync::Arc::new(console::ConsoleState::new(
         collector,
         args.events,
         args.alerts_file,
+        args.token.clone(),
     ));
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(&args.bind)

@@ -163,6 +163,8 @@ pub struct ConsoleState {
     events_dir: Option<PathBuf>,
     /// Alert NDJSON file written by `socteam detect`.
     alerts_file: Option<PathBuf>,
+    /// Bearer token; None = open (loopback default).
+    pub token: Option<String>,
     cache: RwLock<Option<CacheEntry>>,
 }
 
@@ -178,13 +180,36 @@ impl ConsoleState {
         collector: Arc<SnapshotCollector>,
         events_dir: Option<PathBuf>,
         alerts_file: Option<PathBuf>,
+        token: Option<String>,
     ) -> Self {
         Self {
             collector,
             events_dir,
             alerts_file,
+            token,
             cache: RwLock::new(None),
         }
+    }
+
+    /// Whether the request headers carry a valid bearer token.
+    ///
+    /// Open mode (`token` is `None`) allows everything. Otherwise the
+    /// `Authorization` header must be exactly `Bearer <token>`, compared
+    /// in constant time.
+    pub fn is_authorized(&self, headers: &axum::http::HeaderMap) -> bool {
+        let Some(expected) = self.token.as_ref() else {
+            return true;
+        };
+        let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
+            return false;
+        };
+        let Ok(value_str) = value.to_str() else {
+            return false;
+        };
+        let Some(provided) = value_str.strip_prefix("Bearer ") else {
+            return false;
+        };
+        constant_time_eq(provided, expected)
     }
 
     /// The latest live snapshot, if any.
@@ -254,6 +279,52 @@ impl ConsoleState {
             .ok()
             .and_then(|guard| guard.as_ref().map(|entry| entry.alerts.clone()))
             .unwrap_or_default())
+    }
+}
+
+/// Compare two strings in constant time (byte-wise xor accumulation).
+///
+/// Lengths are checked first; content comparison never returns early.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut acc: u8 = 0;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        acc |= x ^ y;
+    }
+    acc == 0
+}
+
+/// Whether a bind address is loopback-only (safe without a token).
+///
+/// Pure, no I/O, never panics: trims and lowercases the input, then
+/// checks for a `127.`, `localhost`, `[::1]`, or `::1` prefix.
+pub fn is_loopback_bind(bind: &str) -> bool {
+    let s = bind.trim().to_lowercase();
+    s.starts_with("127.")
+        || s.starts_with("localhost")
+        || s.starts_with("[::1]")
+        || s.starts_with("::1")
+}
+
+/// Require a bearer token on every route except `/api/health`.
+async fn require_auth(
+    State(state): State<Arc<ConsoleState>>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if req.uri().path() == "/api/health" {
+        return next.run(req).await;
+    }
+    if state.is_authorized(req.headers()) {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "unauthorized"})),
+        )
+            .into_response()
     }
 }
 
@@ -373,6 +444,10 @@ pub fn router(state: Arc<ConsoleState>) -> Router {
         .route("/api/alerts", get(alerts))
         .route("/api/health", get(health))
         .route("/ws", get(ws_handler))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_auth,
+        ))
         .with_state(state)
 }
 
@@ -395,6 +470,7 @@ mod tests {
             Arc::new(SnapshotCollector::new()),
             events,
             alerts,
+            None,
         ))
     }
 
@@ -452,7 +528,7 @@ mod tests {
     async fn stats_returns_snapshot_after_set() {
         let collector = Arc::new(SnapshotCollector::new());
         collector.set_snapshot(sample_snapshot(7));
-        let state = Arc::new(ConsoleState::new(collector, None, None));
+        let state = Arc::new(ConsoleState::new(collector, None, None, None));
         let app = router(state);
         let resp = app
             .oneshot(
@@ -581,5 +657,114 @@ mod tests {
         assert_eq!(alerts[0]["uid"], "alert2");
         assert_eq!(alerts[0]["name"], "arp-spoof");
         assert_eq!(alerts[1]["uid"], "alert1");
+    }
+
+    #[tokio::test]
+    async fn health_always_open_even_with_token() {
+        let state = Arc::new(ConsoleState::new(
+            Arc::new(SnapshotCollector::new()),
+            None,
+            None,
+            Some("s3cret".to_owned()),
+        ));
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("ok"), "unexpected body: {text}");
+    }
+
+    #[tokio::test]
+    async fn stats_requires_bearer_when_token_set() {
+        let state = Arc::new(ConsoleState::new(
+            Arc::new(SnapshotCollector::new()),
+            None,
+            None,
+            Some("s3cret".to_owned()),
+        ));
+        let resp = router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("unauthorized"), "unexpected body: {text}");
+
+        let resp = router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/stats")
+                    .header(header::AUTHORIZATION, "Bearer wrong")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("unauthorized"), "unexpected body: {text}");
+
+        let resp = router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/stats")
+                    .header(header::AUTHORIZATION, "Bearer s3cret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("starting"), "unexpected body: {text}");
+    }
+
+    #[tokio::test]
+    async fn open_mode_without_token_allows_stats() {
+        let state = Arc::new(ConsoleState::new(
+            Arc::new(SnapshotCollector::new()),
+            None,
+            None,
+            None,
+        ));
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("starting"), "unexpected body: {text}");
+    }
+
+    #[tokio::test]
+    async fn non_loopback_without_token_warns() {
+        assert!(is_loopback_bind("127.0.0.1:8080"));
+        assert!(is_loopback_bind("localhost:8080"));
+        assert!(!is_loopback_bind("0.0.0.0:8080"));
+        assert!(!is_loopback_bind("192.168.1.10:8080"));
     }
 }
